@@ -26,7 +26,7 @@ pub struct Statistics {
 
 impl Statistics {
     fn create_statistics(date: Option<Date>) -> GenResult<Self> {
-        let active_timetables = get_valid_timetables(date)?;
+        let active_timetables = get_valid_timetables(date, false)?;
         let timetables = PdfTimetableCollection::get_timetables()?;
         let active_shifts = active_timetables
             .0
@@ -40,7 +40,7 @@ impl Statistics {
         let inactive_shifts = shifts - active_shifts;
         let recent_timetable = active_timetables
             .0
-            .first()
+            .last()
             .and_then(|timetable| timetable.valid_from.format(DATE_FORMAT).ok());
         let next_timetable = active_timetables
             .1

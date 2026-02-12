@@ -14,7 +14,7 @@ pub struct IndexShift {
 
 pub fn get_valid_shifts(date: Option<Date>) -> GenResult<Vec<IndexShift>> {
     let mut available_shifts: HashMap<String, (Date, String)> = HashMap::new();
-    let valid_timetables = get_valid_timetables(date)?.0;
+    let valid_timetables = get_valid_timetables(date, false)?.0;
     for current_timetable in valid_timetables {
         for shift in current_timetable.pages {
             available_shifts.insert(
