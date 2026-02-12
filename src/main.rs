@@ -197,30 +197,49 @@ fn save_extracted_shifts(path: PathBuf, shifts: Vec<Shift>) -> GenResult<()> {
 
 // load all pdf_collection files. And determine which one is current
 // Also if it exists, save the date of when it gets invalidated (when the Next timetable starts)
+// In reverse chronological order
+// Upcoming timetables are placed in the beginning of the list, also in reverse order
 fn get_valid_timetables(
     date: Option<Date>,
+    append_future_timetables: bool,
 ) -> GenResult<(ValidTimetables, NextTimetableChangeDate)> {
     let collections = PdfTimetableCollection::get_timetables()?;
     let current_date = match date {
         Some(date) => date,
         None => OffsetDateTime::now_utc().date(),
     };
-    let mut upcoming_timetables: Vec<Date> = vec![];
-    let mut active_timetables: Vec<PdfTimetableCollection> = vec![];
+    let mut upcoming_timetables: Vec<PdfTimetableCollection> = vec![];
+    let mut current_timetables: Vec<PdfTimetableCollection> = vec![];
     // Loop over all files in the collection folder
     for timetable_collection in collections {
         //if the current collection date is higher than the last but lower than the system date. Make this the most recent one
         if timetable_collection.valid_from > current_date {
-            upcoming_timetables.push(timetable_collection.valid_from);
+            upcoming_timetables.push(timetable_collection);
         }
-
         // Create a list of all currently valid timetables
-        if timetable_collection.valid_from <= current_date {
-            active_timetables.push(timetable_collection)
+        else if timetable_collection.valid_from <= current_date {
+            current_timetables.push(timetable_collection)
         }
     }
 
-    let next_timetable = upcoming_timetables.first().cloned();
+    let next_timetable = upcoming_timetables
+        .last()
+        .and_then(|x| Some(x.valid_from.clone()));
+    // The future timetables should be the first in the list
+    let active_timetables = if append_future_timetables {
+        // first pop the last timetable (the most recent timetable)
+        let recent_timetable = current_timetables.pop();
+        let mut new_timetables = current_timetables;
+        // add the upcoming timetables to the non future timetables (except the first timetable)
+        new_timetables.append(&mut upcoming_timetables);
+        // Add the most recent timetable back to the list
+        if let Some(recent_timetable) = recent_timetable {
+            new_timetables.push(recent_timetable);
+        }
+        new_timetables
+    } else {
+        current_timetables
+    };
 
     Ok((active_timetables, next_timetable))
 }
@@ -265,10 +284,12 @@ async fn get_shift(request: web::Path<String>, query: web::Query<ShiftQuery>) ->
         return handle_stats_request(custom_date_option);
     }
 
-    let mut valid_timetables = match get_valid_timetables(custom_date_option) {
-        Ok(result) => result.0,
-        Err(err) => return return_error(err.to_string()),
-    };
+    let add_upcoming_timetables = custom_date_option.is_none();
+    let mut valid_timetables =
+        match get_valid_timetables(custom_date_option, add_upcoming_timetables) {
+            Ok(result) => result.0,
+            Err(err) => return return_error(err.to_string()),
+        };
 
     let mut shift_split = request_uppercase.split(".");
     let shift = shift_split.next().unwrap_or(&request_uppercase);
