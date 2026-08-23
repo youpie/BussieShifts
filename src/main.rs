@@ -28,6 +28,7 @@ extern crate pretty_env_logger;
 extern crate log;
 
 mod collection;
+mod deadhead;
 mod error;
 mod index;
 mod parsing;

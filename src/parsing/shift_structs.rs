@@ -23,14 +23,16 @@ pub enum ShiftParseError {
     },
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub enum ShiftValid {
-    Weekdays,
-    Wednesday,
-    #[serde(rename = "Weekdays except Wednesdays")]
-    WeekdaysExceptWednesday,
+    Monday,
+    Tuesday,
+    Wednsesday,
+    Thursday,
+    Friday,
     Saturday,
     Sunday,
+    #[default]
     Unknown,
 }
 
@@ -103,7 +105,7 @@ impl ShiftJob {
 #[derive(Debug, Serialize, Clone, Deserialize)]
 pub struct Shift {
     pub shift_nr: String,
-    pub valid_on: ShiftValid,
+    pub valid_on: Vec<ShiftValid>,
     pub location: String,
     pub shift_type: Option<ShiftType>,
     pub job: Vec<ShiftJob>,

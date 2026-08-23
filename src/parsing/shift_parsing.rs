@@ -160,7 +160,7 @@ fn get_line_element(
     let mut naar: Option<_> = None;
     let mut eind: Option<_> = None;
     let mut start_date = Date::from_calendar_date(2025, time::Month::June, 29)?;
-    let mut valid_on = ShiftValid::Unknown;
+    let mut valid_on = Vec::new();
     let mut shift_number = shift_number;
     let mut location = String::new();
     let mut jobs = vec![];
@@ -215,7 +215,7 @@ fn get_line_information(
     eind: &mut Option<String>,
     jobs: &mut Vec<ShiftJob>,
     start_date: &mut Date,
-    valid_on: &mut ShiftValid,
+    valid_on: &mut Vec<ShiftValid>,
     shift_number: &mut String,
     location: &mut String,
     last_y: f32,
@@ -299,7 +299,7 @@ fn get_line_information(
 
 fn identify_metadata(
     start_date: &mut Date,
-    valid_on: &mut ShiftValid,
+    valid_on: &mut Vec<ShiftValid>,
     shift_number: &mut String,
     location: &mut String,
     metadata: String,
@@ -311,16 +311,20 @@ fn identify_metadata(
     } else if metadata.contains("Dienst ") {
         let shift_number_temp = metadata.split("Dienst ").last()?.to_owned();
         *shift_number = shift_number_temp.replace(" ", "");
-    } else if metadata.contains("MA/DI/WO/DO/VR") {
-        *valid_on = ShiftValid::Weekdays;
-    } else if metadata.contains("MA/DI/DO/VR") {
-        *valid_on = ShiftValid::WeekdaysExceptWednesday;
+    } else if metadata.contains("MA") {
+        valid_on.push(ShiftValid::Monday);
+    } else if metadata.contains("DI") {
+        valid_on.push(ShiftValid::Tuesday);
     } else if metadata.contains("WO") {
-        *valid_on = ShiftValid::Wednesday;
+        valid_on.push(ShiftValid::Wednsesday);
+    } else if metadata.contains("DO") {
+        valid_on.push(ShiftValid::Thursday);
+    } else if metadata.contains("VR") {
+        valid_on.push(ShiftValid::Friday);
     } else if metadata.contains("ZA") {
-        *valid_on = ShiftValid::Saturday;
+        valid_on.push(ShiftValid::Saturday);
     } else if metadata.contains("ZO") {
-        *valid_on = ShiftValid::Sunday;
+        valid_on.push(ShiftValid::Sunday);
     } else if current_y > 760.0 && current_x > 300.0 {
         // warn!("locatie gevonden: {metadata}\ny: {current_y}");
         *location = metadata
