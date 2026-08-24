@@ -36,6 +36,7 @@ pub enum ShiftValidDay {
     Unknown,
 }
 
+/// **Remove in the future!!!!!!!!!!!!!!!!!!!**
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum ShiftValid {
     Weekdays,
