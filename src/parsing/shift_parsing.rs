@@ -160,7 +160,8 @@ fn get_line_element(
     let mut naar: Option<_> = None;
     let mut eind: Option<_> = None;
     let mut start_date = Date::from_calendar_date(2025, time::Month::June, 29)?;
-    let mut valid_on = Vec::new();
+    let mut valid_on = ShiftValid::Unknown;
+    let mut valid_days = Vec::new();
     let mut shift_number = shift_number;
     let mut location = String::new();
     let mut jobs = vec![];
@@ -176,6 +177,7 @@ fn get_line_element(
             &mut jobs,
             &mut start_date,
             &mut valid_on,
+            &mut valid_days,
             &mut shift_number,
             &mut location,
             last_y,
@@ -193,6 +195,7 @@ fn get_line_element(
     Ok(Shift {
         shift_nr: shift_number,
         valid_on,
+        valid_days,
         location,
         shift_type: None,
         job: jobs,
@@ -215,7 +218,8 @@ fn get_line_information(
     eind: &mut Option<String>,
     jobs: &mut Vec<ShiftJob>,
     start_date: &mut Date,
-    valid_on: &mut Vec<ShiftValid>,
+    valid_on: &mut ShiftValid,
+    valid_days: &mut Vec<ShiftValidDay>,
     shift_number: &mut String,
     location: &mut String,
     last_y: f32,
@@ -267,6 +271,7 @@ fn get_line_information(
             identify_metadata(
                 &mut *start_date,
                 &mut *valid_on,
+                &mut *valid_days,
                 &mut *shift_number,
                 &mut *location,
                 metadata,
@@ -299,37 +304,53 @@ fn get_line_information(
 
 fn identify_metadata(
     start_date: &mut Date,
-    valid_on: &mut Vec<ShiftValid>,
+    valid_on: &mut ShiftValid,
+    valid_days: &mut Vec<ShiftValidDay>,
     shift_number: &mut String,
     location: &mut String,
     metadata: String,
     current_y: f32,
     current_x: f32,
 ) -> Option<()> {
+    let metadata_clone = metadata.clone();
     if metadata.contains("Ingangsdatum ") {
         *start_date = Date::parse(metadata.split("Ingangsdatum ").last()?, DATE_FORMAT).ok()?;
     } else if metadata.contains("Dienst ") {
         let shift_number_temp = metadata.split("Dienst ").last()?.to_owned();
         *shift_number = shift_number_temp.replace(" ", "");
     } else if metadata.contains("MA") {
-        valid_on.push(ShiftValid::Monday);
+        valid_days.push(ShiftValidDay::Monday);
     } else if metadata.contains("DI") {
-        valid_on.push(ShiftValid::Tuesday);
+        valid_days.push(ShiftValidDay::Tuesday);
     } else if metadata.contains("WO") {
-        valid_on.push(ShiftValid::Wednsesday);
+        valid_days.push(ShiftValidDay::Wednsesday);
     } else if metadata.contains("DO") {
-        valid_on.push(ShiftValid::Thursday);
+        valid_days.push(ShiftValidDay::Thursday);
     } else if metadata.contains("VR") {
-        valid_on.push(ShiftValid::Friday);
+        valid_days.push(ShiftValidDay::Friday);
     } else if metadata.contains("ZA") {
-        valid_on.push(ShiftValid::Saturday);
+        valid_days.push(ShiftValidDay::Saturday);
+        *valid_on = ShiftValid::Saturday;
     } else if metadata.contains("ZO") {
-        valid_on.push(ShiftValid::Sunday);
+        valid_days.push(ShiftValidDay::Sunday);
+        *valid_on = ShiftValid::Sunday;
     } else if current_y > 760.0 && current_x > 300.0 {
         // warn!("locatie gevonden: {metadata}\ny: {current_y}");
         *location = metadata
     }
 
+    //Backwards compatibility
+    if metadata_clone.contains("MA/DI/WO/DO/VR") {
+        *valid_on = ShiftValid::Weekdays;
+    } else if metadata_clone.contains("MA/DI/DO/VR") {
+        *valid_on = ShiftValid::WeekdaysExceptWednesday;
+    } else if metadata_clone.contains("WO") {
+        *valid_on = ShiftValid::Wednesday;
+    } else if metadata_clone.contains("ZA") {
+        *valid_on = ShiftValid::Saturday;
+    } else if metadata_clone.contains("ZO") {
+        *valid_on = ShiftValid::Sunday;
+    }
     Some(())
 }
 
