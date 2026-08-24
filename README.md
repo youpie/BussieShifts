@@ -26,14 +26,15 @@ Sometimes a timetable is valid again after another timetable was valid, in this 
 ...
 ```
 
-# How to use locations.toml
-_I dont actually know if the file is valid toml_
+# How to use locations.txt
 
 If looking for deadheads, multiple destinations actually lead to the same destination. In this file that can be specified. The file can be found at `./locations.toml`.
+This file also defines the Concession that are supported by Bussie
 
 **Example**
-```toml
-[Location name]
+```
+# Concession name
+> Location name
 Destination name 1
 Destination name 2
 ...
