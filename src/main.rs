@@ -1,19 +1,13 @@
 use crate::collection::{PdfTimetableCollection, ShiftData};
-use crate::parsing::{shift_parsing::parse_pdf, shift_structs::Shift};
 use crate::statistics::handle_stats_request;
 use actix_web::http::header::ContentType;
 use actix_web::{App, HttpResponse, HttpServer, Responder, get, web};
 use index::handle_index_request;
-use lopdf::Document;
 use qpdf::QPdf;
-use regex::Regex;
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::error::Error;
 use std::ffi::OsStr;
 use std::fs::{self};
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::io;
 use std::path::{Component, PathBuf};
 use std::time::SystemTime;
 use time::format_description::BorrowedFormatItem;
@@ -40,7 +34,7 @@ type NextTimetableChangeDate = Option<Date>;
 //const PDF_PATH: &str = "Dienstboek";
 const COLLECTION_PATH: &str = "pdf_collection";
 
-const BOOK_PATH: &str = "Dienstboek";
+const BOOKS_PATH: &str = "Dienstboek";
 
 const CHANGE_FOLDER_NAME: &str = "Wijzigingen";
 
@@ -55,10 +49,17 @@ struct ShiftQuery {
     date: Option<String>, // Optional date query parameter
 }
 
-fn get_timetable_files() -> GenResult<Vec<PathBuf>> {
-    let mut trip_files = Vec::new();
-    let mut updated_trip_files = Vec::new();
-    for entry in WalkDir::new(BOOK_PATH).into_iter().filter_map(Result::ok) {
+#[derive(Hash, Debug)]
+struct TimetablePaths {
+    pub timetable_pdfs: Vec<PathBuf>,
+    pub valid_from_files: Vec<PathBuf>,
+}
+
+fn get_timetable_pdf_files() -> GenResult<TimetablePaths> {
+    let mut timetable_pdfs = Vec::new();
+    let mut updated_timetable_pdfs = Vec::new();
+    let mut valid_on_files = Vec::new();
+    for entry in WalkDir::new(BOOKS_PATH).into_iter().filter_map(Result::ok) {
         let path = entry.path();
         if path
             .components()
@@ -67,132 +68,48 @@ fn get_timetable_files() -> GenResult<Vec<PathBuf>> {
         {
             debug!("Found {path:?}");
             if path.is_file() {
-                updated_trip_files.push(path.to_path_buf());
+                updated_timetable_pdfs.push(path.to_path_buf());
             }
-        } else {
-            if path.is_file() {
-                // Skip directories
-                trip_files.push(path.to_path_buf());
-            }
+        } else if path.file_name() == Some(OsStr::new("valid_on.txt")) {
+            valid_on_files.push(path.to_path_buf());
+        } else if path.is_file() {
+            // Skip directories
+            timetable_pdfs.push(path.to_path_buf());
         }
     }
-    updated_trip_files
+    updated_timetable_pdfs
         .sort_by_key(|element| get_creation_date(element).unwrap_or(SystemTime::now()));
-    debug!("Changed sheets: {updated_trip_files:#?}");
-    trip_files.extend(updated_trip_files);
-    Ok(trip_files)
+    debug!("Changed sheets: {updated_timetable_pdfs:#?}");
+    timetable_pdfs.extend(updated_timetable_pdfs);
+    Ok(TimetablePaths {
+        timetable_pdfs,
+        valid_from_files: valid_on_files,
+    })
 }
 
 fn get_creation_date(path: &PathBuf) -> GenResult<SystemTime> {
     Ok(fs::metadata(path)?.created()?)
 }
 
-fn load_pdf_and_index() -> GenResult<()> {
-    let files = get_timetable_files()?;
+fn load_pdfs_and_index() -> GenResult<()> {
+    let files = get_timetable_pdf_files()?;
     fs::remove_dir_all(COLLECTION_PATH)?;
     fs::create_dir(COLLECTION_PATH)?;
-    for file_path in files.iter().enumerate() {
-        parse_trip_sheets(file_path.1.into(), file_path.0)?;
-    }
-    PdfTimetableCollection::load_timetables_from_disk()?;
-    Ok(())
-}
-
-// Load every PDF and group them
-fn parse_trip_sheets(pdf_path: PathBuf, file_id: usize) -> Result<(), Box<dyn Error>> {
-    // Load the PDF document.
-    let shift_data_map = load_shift_data(&pdf_path, file_id)?;
-    let parsed_shifts = parse_pdf(&pdf_path, shift_data_map.clone())?;
-    let valid_from_day = parsed_shifts
-        .first()
-        .result_reason("No shifts found")?
-        .starting_date;
-    let valid_from_string = valid_from_day.format(DATE_FORMAT).unwrap();
-    let mut output_path = PathBuf::from(format!("{}/{}", COLLECTION_PATH, valid_from_string));
-    save_extracted_shifts(output_path.clone(), parsed_shifts)?;
-    output_path.set_extension("json");
-    let pdf_collection: PdfTimetableCollection = if let Ok(file) = fs::read_to_string(&output_path)
-    {
-        info!("Extending existing collection {:?}", &output_path);
-        let mut pdf_collection: PdfTimetableCollection = serde_json::from_str(&file)?;
-        pdf_collection
-            .files
-            .insert(file_id, pdf_path.to_string_lossy().to_string());
-        pdf_collection.pages.extend(shift_data_map);
-        pdf_collection
-    } else {
-        info!("Writing new collection {:?}", &output_path);
-        PdfTimetableCollection {
-            valid_from: valid_from_day,
-            files: HashMap::from([(file_id, pdf_path.to_string_lossy().to_string())]),
-            pages: shift_data_map,
-        }
-    };
-
-    // Serialize the index into pretty JSON.
-    let index_json = serde_json::to_string_pretty(&pdf_collection)?;
-    fs::write(&output_path, index_json)?;
-    Ok(())
-}
-
-fn load_shift_data(path: &PathBuf, file_id: usize) -> GenResult<HashMap<String, ShiftData>> {
-    let doc = Document::load(&path)?;
-
-    // Define a regex pattern that finds "Dienst" followed by a trip number.
-    let re = Regex::new(r"Dienst\s*(\b[A-Z]{1,2} \d{4}\b)")?;
-    let mut index: HashMap<String, ShiftData> = HashMap::new();
-
-    // Iterate over all pages in the PDF.
-    // `get_pages` returns a map of page numbers to their internal object IDs.
-    for (page_num, _) in doc.get_pages().iter() {
-        // Extract text from the current page.
-        let text = doc.extract_text(&[*page_num]).unwrap_or_default();
-
-        // Search for matches in the page text.
-        for cap in re.captures_iter(&text) {
-            // Capture the group that contains the trip number.
-            let shift_name = cap.get(1).map_or("", |m| m.as_str()).to_string();
-            let shift_number: String = shift_name
-                .chars()
-                .filter(|character| character.is_numeric())
-                .collect();
-            let shift_prefix: String = shift_name
-                .chars()
-                .filter(|character| character.is_alphabetic())
-                .collect();
-            if !shift_number.is_empty() {
-                index
-                    .entry(shift_number)
-                    .and_modify(|shift_data| shift_data.pages.push(*page_num))
-                    .or_insert(ShiftData {
-                        pages: vec![*page_num],
-                        file_id,
-                        shift_prefix,
-                    });
-            }
+    let mut timetable_collections = Vec::new();
+    for file_path in files.timetable_pdfs.iter().enumerate() {
+        let collection = PdfTimetableCollection::new_or_extend(
+            &mut timetable_collections,
+            file_path.1.into(),
+            file_path.0,
+        )?;
+        if let Some(collection) = collection {
+            timetable_collections.push(collection);
         }
     }
-    Ok(index)
-}
-
-fn save_extracted_shifts(path: PathBuf, shifts: Vec<Shift>) -> GenResult<()> {
-    match std::fs::create_dir(&path) {
-        Ok(_) => (),
-        Err(kind) if kind.kind() == io::ErrorKind::AlreadyExists => (),
-        Err(kind) => return Err(Box::new(kind)),
-    };
-    for shift in shifts {
-        let shift_json = serde_json::to_string_pretty(&shift)?;
-        let shift_number: String = shift
-            .shift_nr
-            .chars()
-            .filter(|character| character.is_numeric())
-            .collect();
-        let mut shift_path = path.clone();
-        shift_path.push(shift_number);
-        shift_path.set_extension("json");
-        fs::write(shift_path, shift_json)?;
-    }
+    timetable_collections =
+        PdfTimetableCollection::add_valid_from_data(timetable_collections, files.valid_from_files);
+    PdfTimetableCollection::save(timetable_collections)?;
+    PdfTimetableCollection::load_to_global()?;
     Ok(())
 }
 
@@ -204,7 +121,7 @@ fn get_valid_timetables(
     date: Option<Date>,
     append_future_timetables: bool,
 ) -> GenResult<(ValidTimetables, NextTimetableChangeDate)> {
-    let collections = PdfTimetableCollection::get_timetables()?;
+    let collections = PdfTimetableCollection::get_global()?;
     let current_date = match date {
         Some(date) => date,
         None => OffsetDateTime::now_utc().date(),
@@ -214,18 +131,18 @@ fn get_valid_timetables(
     // Loop over all files in the collection folder
     for timetable_collection in collections {
         //if the current collection date is higher than the last but lower than the system date. Make this the most recent one
-        if timetable_collection.valid_from > current_date {
+        if timetable_collection.start_date > current_date {
             upcoming_timetables.push(timetable_collection);
         }
         // Create a list of all currently valid timetables
-        else if timetable_collection.valid_from <= current_date {
+        else if timetable_collection.start_date <= current_date {
             current_timetables.push(timetable_collection)
         }
     }
 
     let next_timetable = upcoming_timetables
         .last()
-        .and_then(|x| Some(x.valid_from.clone()));
+        .and_then(|x| Some(x.start_date.clone()));
     // The future timetables should be the first in the list
     let active_timetables = if append_future_timetables {
         // first pop the last timetable (the most recent timetable)
@@ -261,7 +178,7 @@ fn find_shift(
 }
 
 fn handle_refresh_request() -> HttpResponse {
-    _ = load_pdf_and_index();
+    _ = load_pdfs_and_index();
 
     return HttpResponse::Accepted().body("Shifts sucessfully indexed");
 }
@@ -323,7 +240,7 @@ async fn get_shift(request: web::Path<String>, query: web::Query<ShiftQuery>) ->
         && shift_extension == "JSON"
     {
         info!("Got JSON request for {request_uppercase}");
-        match find_json_shift(numeric_shift_number, shift_collection.valid_from) {
+        match find_json_shift(numeric_shift_number, shift_collection.start_date) {
             Ok(json) => HttpResponse::Ok()
                 .content_type(ContentType::json())
                 .body(json),
@@ -388,7 +305,7 @@ async fn main() -> std::io::Result<()> {
     info!("Indexing trip sheets");
     // Get the hash of all files in the folder. If anything changes, the hash changes and so it will reindex
     let mut s = DefaultHasher::new();
-    let files = get_timetable_files().expect("Failed to get timetable files");
+    let files = get_timetable_pdf_files().expect("Failed to get timetable files");
     files.hash(&mut s);
     let current_hash = s.finish();
     let _previous_hash_option = fs::read("pdf_hash")
@@ -399,21 +316,21 @@ async fn main() -> std::io::Result<()> {
         if let Some(previous_hash) = _previous_hash_option {
             if previous_hash != current_hash {
                 warn!("Hash is changed, reindexing files");
-                load_pdf_and_index();
+                load_pdfs_and_index();
             } else {
                 info!("Hash is the same, so wont reindex");
             }
         } else {
             error!("Could not find previous hash, reindexing");
-            load_pdf_and_index();
+            load_pdfs_and_index();
         }
     }
     #[cfg(debug_assertions)]
     {
-        load_pdf_and_index().unwrap();
+        load_pdfs_and_index().unwrap();
     }
     let _ = fs::write("pdf_hash", current_hash.to_le_bytes());
-    PdfTimetableCollection::load_timetables_from_disk().unwrap();
+    PdfTimetableCollection::load_to_global().unwrap();
 
     HttpServer::new(move || App::new().service(get_shift))
         .bind("0.0.0.0:8080")?

@@ -1,6 +1,10 @@
+use std::{fs, io, path::PathBuf};
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use time::{Date, Time};
+
+use crate::GenResult;
 
 #[derive(Error, Debug, Serialize, Deserialize, Clone)]
 pub enum ShiftParseError {
@@ -124,4 +128,27 @@ pub struct Shift {
     pub job: Vec<ShiftJob>,
     pub starting_date: Date,
     pub parse_error: Option<Vec<ShiftParseError>>,
+}
+
+impl Shift {
+    pub fn save_extracted_shifts(shifts: Vec<Self>, path: PathBuf) -> GenResult<()> {
+        match std::fs::create_dir(&path) {
+            Ok(_) => (),
+            Err(kind) if kind.kind() == io::ErrorKind::AlreadyExists => (),
+            Err(kind) => return Err(Box::new(kind)),
+        };
+        for shift in shifts {
+            let shift_json = serde_json::to_string_pretty(&shift)?;
+            let shift_number: String = shift
+                .shift_nr
+                .chars()
+                .filter(|character| character.is_numeric())
+                .collect();
+            let mut shift_path = path.clone();
+            shift_path.push(shift_number);
+            shift_path.set_extension("json");
+            fs::write(shift_path, shift_json)?;
+        }
+        Ok(())
+    }
 }

@@ -2,20 +2,18 @@ use std::{fs, path::PathBuf};
 
 use time::Date;
 
-/// If file could not be loaded for any reason, will print the error, and only return the `pdf_date`
-fn get_timetable_valid_on(path: PathBuf, pdf_date: Date) -> Vec<Date> {
+/// Get the dates on which the timetable should be treated as a new timetable. Load this from valid_on.txt
+/// If file could not be loaded for any reason, will print the error, and only return an empty vec
+pub fn get_timetable_valid_on(path: PathBuf) -> Vec<Date> {
     match fs::read_to_string(&path) {
         Ok(file) => {
-            let mut lines = file.lines();
-
-            let mut dates = if lines.next() == Some(".") {
-                vec![pdf_date]
-            } else {
-                Vec::new()
-            };
-
+            let lines = file.lines();
+            let mut dates = Vec::new();
             for line in lines {
-                if let Ok(date) = time::Date::parse(line, crate::DATE_FORMAT) {
+                if line.contains('.')
+                    && let clean_line = line.replace('.', "")
+                    && let Ok(date) = time::Date::parse(&clean_line, crate::DATE_FORMAT)
+                {
                     dates.push(date);
                 }
             }
@@ -24,7 +22,7 @@ fn get_timetable_valid_on(path: PathBuf, pdf_date: Date) -> Vec<Date> {
         }
         Err(e) => {
             println!("Could not load {path:?}: {}", e.to_string());
-            vec![pdf_date]
+            Vec::new()
         }
     }
 }

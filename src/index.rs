@@ -19,7 +19,7 @@ pub fn get_valid_shifts(date: Option<Date>) -> GenResult<Vec<IndexShift>> {
         for shift in current_timetable.pages {
             available_shifts.insert(
                 shift.0,
-                (current_timetable.valid_from, shift.1.shift_prefix),
+                (current_timetable.start_date, shift.1.shift_prefix),
             );
         }
     }
