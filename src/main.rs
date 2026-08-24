@@ -70,11 +70,13 @@ fn get_timetable_pdf_files() -> GenResult<TimetablePaths> {
             if path.is_file() {
                 updated_timetable_pdfs.push(path.to_path_buf());
             }
-        } else if path.file_name() == Some(OsStr::new("valid_on.txt")) {
+        } else if path.file_name() == Some(OsStr::new("valid_from.txt")) {
             valid_on_files.push(path.to_path_buf());
-        } else if path.is_file() {
+        } else if path.is_file() && path.extension() == Some(OsStr::new("pdf")) {
             // Skip directories
             timetable_pdfs.push(path.to_path_buf());
+        } else if path.is_file() {
+            info!("Ignoring file {path:?} (probably missing .pdf)");
         }
     }
     updated_timetable_pdfs

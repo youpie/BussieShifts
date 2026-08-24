@@ -10,18 +10,16 @@ pub fn get_timetable_valid_on(path: PathBuf) -> Vec<Date> {
             let lines = file.lines();
             let mut dates = Vec::new();
             for line in lines {
-                if line.contains('.')
-                    && let clean_line = line.replace('.', "")
+                if let clean_line = line.replace('.', "")
                     && let Ok(date) = time::Date::parse(&clean_line, crate::DATE_FORMAT)
                 {
                     dates.push(date);
                 }
             }
-
             dates
         }
         Err(e) => {
-            println!("Could not load {path:?}: {}", e.to_string());
+            warn!("Could not load {path:?}: {}", e.to_string());
             Vec::new()
         }
     }
