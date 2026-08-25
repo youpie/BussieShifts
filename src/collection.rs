@@ -102,8 +102,8 @@ impl PdfTimetableCollection {
 
     pub fn save(collections: &Vec<Self>) -> GenResult<()> {
         for collection in collections {
+            Shift::save_extracted_shifts(collection.shifts.clone())?;
             let mut output_path = collection.collection_path();
-            Shift::save_extracted_shifts(collection.shifts.clone(), output_path.clone())?;
             output_path.set_extension("json");
             fs::write(
                 output_path,

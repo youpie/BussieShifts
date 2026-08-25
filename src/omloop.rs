@@ -1,8 +1,10 @@
-use std::{collections::HashMap, fs};
+use std::{collections::HashMap, fs, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
+use time::Date;
 
 use crate::{
+    COLLECTION_PATH, DATE_FORMAT, OMLOOP_PATH,
     collection::PdfTimetableCollection,
     parsing::shift_structs::{Shift, ShiftJob, ShiftValidDay},
 };
@@ -17,7 +19,7 @@ impl OmloopIndex {
         debug!("Indexing omlopen");
         let mut omlopen_map = HashMap::new();
         for shift in &timetable.pages {
-            if let Some(shift) = Shift::load(timetable, &shift.0) {
+            if let Some(shift) = Shift::load(timetable, &shift.0).ok() {
                 BusOmloopDay::new_or_extend(&mut omlopen_map, shift);
             } else {
                 warn!("Skipped loading {}", shift.0);
@@ -82,5 +84,17 @@ impl BusOmloopDay {
 
     pub(self) fn sort_jobs(&mut self) {
         self.jobs.sort_by_key(|k| k.start);
+    }
+
+    pub(self) fn get_path(omloop: &str, start_date: Date, index: u8) -> PathBuf {
+        let start_date = start_date.format(DATE_FORMAT).unwrap();
+        PathBuf::from(format!(
+            "{COLLECTION_PATH}/{start_date}/{OMLOOP_PATH}/{}",
+            Self::get_filename(omloop, index)
+        ))
+    }
+
+    pub(self) fn get_filename(omloop: &str, index: u8) -> String {
+        format!("{index}_{omloop}.json")
     }
 }

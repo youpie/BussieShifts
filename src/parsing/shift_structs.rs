@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use time::{Date, Time};
 
-use crate::{COLLECTION_PATH, DATE_FORMAT, GenResult, collection::PdfTimetableCollection};
+use crate::{
+    COLLECTION_PATH, DATE_FORMAT, GenResult, SHIFT_PATH, collection::PdfTimetableCollection,
+};
 
 #[derive(Error, Debug, Serialize, Deserialize, Clone)]
 pub enum ShiftParseError {
@@ -131,34 +133,48 @@ pub struct Shift {
 }
 
 impl Shift {
-    pub fn load(timetable: &PdfTimetableCollection, id: &str) -> Option<Self> {
-        let base_path = timetable.start_date.format(DATE_FORMAT).unwrap();
-        let path = PathBuf::from(format!("{COLLECTION_PATH}/{base_path}/{id}.json"));
-        fs::read_to_string(path)
-            .ok()
-            .and_then(|v| serde_json::from_str::<Self>(&v).ok())
+    pub fn load(timetable: &PdfTimetableCollection, id: &str) -> GenResult<Self> {
+        Ok(serde_json::from_str::<Self>(&Self::load_json(
+            timetable, id,
+        )?)?)
+    }
+
+    pub fn load_json(timetable: &PdfTimetableCollection, id: &str) -> GenResult<String> {
+        let base_path = timetable.start_date.format(DATE_FORMAT)?;
+        let path = PathBuf::from(format!(
+            "{COLLECTION_PATH}/{base_path}/{SHIFT_PATH}/{id}.json"
+        )); // Because we don't have the shift itself yet, we need to recreate the path and get the date from the timetable collection
+        Ok(fs::read_to_string(path)?)
     }
 
     pub fn save_extracted_shifts(shifts: Vec<Self>) -> GenResult<()> {
-        match std::fs::create_dir(&path) {
-            Ok(_) => (),
-            Err(kind) if kind.kind() == io::ErrorKind::AlreadyExists => (),
-            Err(kind) => return Err(Box::new(kind)),
-        };
-        for shift in shifts {
-            let shift_json = serde_json::to_string_pretty(&shift)?;
-            let shift_number: String = shift
-                .shift_nr
-                .chars()
-                .filter(|character| character.is_numeric())
-                .collect();
-            let mut shift_path = path.clone();
-            shift_path.push(shift_number);
-            shift_path.set_extension("json");
-            fs::write(shift_path, shift_json)?;
+        if let Some(shift) = shifts.first() {
+            let path = Self::create_shift_path(shift);
+            match std::fs::create_dir(&path) {
+                Ok(_) => (),
+                Err(kind) if kind.kind() == io::ErrorKind::AlreadyExists => (),
+                Err(kind) => return Err(Box::new(kind)),
+            };
+            for shift in shifts {
+                let shift_json = serde_json::to_string_pretty(&shift)?;
+                let shift_number: String = shift
+                    .shift_nr
+                    .chars()
+                    .filter(|character| character.is_numeric())
+                    .collect();
+                let mut shift_path = path.clone();
+                shift_path.push(shift_number);
+                shift_path.set_extension("json");
+                fs::write(shift_path, shift_json)?;
+            }
+            Ok(())
+        } else {
+            Err("No shifts contained".into())
         }
-        Ok(())
     }
 
-    // fn create_shift_dar
+    fn create_shift_path(&self) -> PathBuf {
+        let start_date = self.starting_date.format(DATE_FORMAT).unwrap();
+        PathBuf::from(format!("{COLLECTION_PATH}/{start_date}/{SHIFT_PATH}"))
+    }
 }

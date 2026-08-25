@@ -1,5 +1,6 @@
 use crate::collection::{PdfTimetableCollection, ShiftData};
 use crate::omloop::OmloopIndex;
+use crate::parsing::shift_structs::Shift;
 use crate::statistics::handle_stats_request;
 use actix_web::http::header::ContentType;
 use actix_web::{App, HttpResponse, HttpServer, Responder, get, web};
@@ -189,9 +190,12 @@ fn find_shift(
 }
 
 fn handle_refresh_request() -> HttpResponse {
-    _ = load_pdfs_and_index();
-
-    return HttpResponse::Accepted().body("Shifts sucessfully indexed");
+    match load_pdfs_and_index() {
+        Ok(_) => HttpResponse::Accepted().body("Shifts sucessfully indexed"),
+        Err(_err) => HttpResponse::InternalServerError().body(format!(
+            "Shifts could not be indexed. Check logs for more details"
+        )),
+    }
 }
 
 #[get("/shift/{shift_number}")]
@@ -251,7 +255,7 @@ async fn get_shift(request: web::Path<String>, query: web::Query<ShiftQuery>) ->
         && shift_extension == "JSON"
     {
         info!("Got JSON request for {request_uppercase}");
-        match find_json_shift(numeric_shift_number, shift_collection.start_date) {
+        match Shift::load_json(&shift_collection, &numeric_shift_number) {
             Ok(json) => HttpResponse::Ok()
                 .content_type(ContentType::json())
                 .body(json),
@@ -271,17 +275,8 @@ async fn get_shift(request: web::Path<String>, query: web::Query<ShiftQuery>) ->
 fn return_error(error: String) -> HttpResponse {
     HttpResponse::InternalServerError().body(format!(
         "<h1>Sorry, something went wrong loading that shift.</h1><br>error: {}",
-        error.to_string()
+        error
     ))
-}
-
-fn find_json_shift(shift_number: String, shift_timetable_date: Date) -> GenResult<String> {
-    let filepath = format!(
-        "{COLLECTION_PATH}/{date_str}/{shift_number}.json",
-        date_str = shift_timetable_date.format(DATE_FORMAT)?
-    );
-    let file_json = fs::read_to_string(filepath)?;
-    Ok(file_json)
 }
 
 fn find_pdf_shift(
@@ -333,7 +328,7 @@ async fn main() -> std::io::Result<()> {
             }
         } else {
             error!("Could not find previous hash, reindexing");
-            load_pdfs_and_index();
+            load_pdfs_and_index().unwrap();
         }
     }
     #[cfg(debug_assertions)]
