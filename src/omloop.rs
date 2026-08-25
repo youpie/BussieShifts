@@ -10,13 +10,18 @@ use crate::{
 
 use crate::prelude::*;
 
+type Omloop = usize;
+type Index = u8;
+type DayOfTheWeek = u8;
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct OmloopIndex {
-    index: HashMap<Omloop, HashMap<ShiftValidDay, u8>>,
+    index: HashMap<Omloop, HashMap<DayOfTheWeek, Index>>,
 }
 
 impl OmloopIndex {
     /// Will also save omloops and Self to disk
-    pub fn new_omloop_timetable(timetable: &PdfTimetableCollection) {
+    pub fn new_omloop_timetable(timetable: &PdfTimetableCollection) -> Result<Self> {
         debug!("Indexing omlopen");
         let mut omlopen_map = HashMap::new();
         for shift in &timetable.pages {
@@ -26,25 +31,67 @@ impl OmloopIndex {
                 warn!("Skipped loading {}", shift.0);
             }
         }
+
+        // create the valid days index map
+        let mut valid_index_map = HashMap::new();
+        let mut omloop_current_index: HashMap<Omloop, Index> = HashMap::new();
         for mut omloop in omlopen_map {
             omloop.1.sort_jobs();
-            fs::write(
-                format!(
-                    "test/{:?}_{}_{:?}.json",
-                    timetable.start_date, omloop.0.0, omloop.0.1
-                ),
-                serde_json::to_string_pretty(&omloop.1).unwrap(),
-            )
-            .unwrap();
+            let index = if let Some(index) = omloop_current_index.get(&omloop.0.0) {
+                let temp_index = *index;
+                omloop_current_index.insert(omloop.0.0, temp_index + 1);
+                temp_index + 1
+            } else {
+                omloop_current_index.insert(omloop.0.0, 0);
+                0
+            };
+            for valid_day in omloop.0.1 {
+                if !valid_index_map.contains_key(&omloop.0.0) {
+                    valid_index_map.insert(omloop.0.0, HashMap::new());
+                }
+                if let Some(valid_map) = valid_index_map.get_mut(&omloop.0.0) {
+                    valid_map.insert(valid_day as u8, index);
+                }
+            }
+            omloop.1.save(timetable.start_date, index)?;
         }
+
+        let index_map = Self {
+            index: valid_index_map,
+        };
+
+        index_map.save(timetable)?;
+        Ok(index_map)
     }
 
-    pub fn get(
-        omloop: usize,
-        day: ShiftValidDay,
-        timetable: &PdfTimetableCollection,
-    ) -> BusOmloopDay {
-        todo!()
+    fn save(&self, timetable: &PdfTimetableCollection) -> Result<()> {
+        let path = Self::path(timetable);
+        _ = std::fs::create_dir_all(get_base_path(timetable.start_date));
+        Ok(fs::write(path, serde_json::to_string(self)?).wrap_err("Failed to save OmloopIndex")?)
+    }
+
+    fn load(timetable: &PdfTimetableCollection) -> Result<Self> {
+        let path = Self::path(timetable);
+        Ok(
+            serde_json::from_str(&fs::read_to_string(path).wrap_err("Failed to read OmloopIndex")?)
+                .wrap_err("Failed to parse OmloopIndex")?,
+        )
+    }
+
+    fn path(timetable: &PdfTimetableCollection) -> PathBuf {
+        let mut path = BusOmloopDay::get_path(0, timetable.start_date, 0);
+        path.set_file_name("index.json");
+        path
+    }
+
+    pub fn get(omloop: usize, day: u8, timetable: &PdfTimetableCollection) -> Result<BusOmloopDay> {
+        let index_map = Self::load(timetable)?;
+        let index = *index_map
+            .index
+            .get(&omloop)
+            .and_then(|v| v.get(&day))
+            .result_reason("No omloop report found for that day")?;
+        Ok(BusOmloopDay::load(omloop, timetable.start_date, index)?)
     }
 }
 
@@ -54,8 +101,6 @@ pub struct BusOmloopDay {
     jobs: Vec<ShiftJob>,
     index: u8,
 }
-
-type Omloop = usize;
 
 impl BusOmloopDay {
     pub(self) fn new_or_extend(
@@ -71,7 +116,6 @@ impl BusOmloopDay {
                 omloop_dag.jobs.push(job.clone());
             } else if let Some(job_omloop) = job.omloop {
                 // If the omloop is not found in the Hasmap, we create a new instance
-                debug!("Creating new omloop {job_omloop}");
                 let new_omloop_day = Self {
                     omloop: job_omloop,
                     jobs: vec![job.clone()],
@@ -82,19 +126,34 @@ impl BusOmloopDay {
         }
     }
 
+    pub(self) fn load(omloop: Omloop, start_date: Date, index: u8) -> Result<Self> {
+        let path = Self::get_path(omloop, start_date, index);
+        Ok(serde_json::from_str(&fs::read_to_string(path)?)?)
+    }
+
+    pub(self) fn save(&self, start_date: Date, index: u8) -> Result<()> {
+        let path = Self::get_path(self.omloop, start_date, index);
+        _ = std::fs::create_dir_all(get_base_path(start_date));
+        Ok(fs::write(path, serde_json::to_string_pretty(self)?)?)
+    }
+
     pub(self) fn sort_jobs(&mut self) {
         self.jobs.sort_by_key(|k| k.start);
     }
 
-    pub(self) fn get_path(omloop: &str, start_date: Date, index: u8) -> PathBuf {
-        let start_date = start_date.format(DATE_FORMAT).unwrap();
-        PathBuf::from(format!(
-            "{COLLECTION_PATH}/{start_date}/{OMLOOP_PATH}/{}",
-            Self::get_filename(omloop, index)
-        ))
+    pub(self) fn get_path(omloop: Omloop, start_date: Date, index: u8) -> PathBuf {
+        let mut path = get_base_path(start_date);
+        path.push(Self::get_filename(omloop, index));
+        debug!("{path:?}");
+        path
     }
 
-    pub(self) fn get_filename(omloop: &str, index: u8) -> String {
+    pub(self) fn get_filename(omloop: Omloop, index: u8) -> String {
         format!("{index}_{omloop}.json")
     }
+}
+
+fn get_base_path(start_date: Date) -> PathBuf {
+    let start_date = start_date.format(DATE_FORMAT).unwrap();
+    PathBuf::from(format!("{COLLECTION_PATH}/{start_date}/{OMLOOP_PATH}/"))
 }

@@ -9,7 +9,7 @@ use super::*;
 
 #[derive(Error, Debug, Serialize, Deserialize, Clone)]
 pub enum ShiftParseError {
-    #[error("Shift on page {page_number} had a generic error{error_string}\nline: {line:?}",error_string = error.to_string())]
+    #[error("Shift on page {page_number} had a generic error {error_string}\nline: {line:?}",error_string = error.to_string())]
     GenericShiftError {
         page_number: u32,
         error: String,
@@ -30,7 +30,7 @@ pub enum ShiftParseError {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default, Eq, Hash, PartialEq)]
 pub enum ShiftValidDay {
-    Monday,
+    Monday = 0,
     Tuesday,
     Wednsesday,
     Thursday,
@@ -149,7 +149,7 @@ impl Shift {
     pub fn save_extracted_shifts(shifts: Vec<Self>) -> Result<()> {
         if let Some(shift) = shifts.first() {
             let path = Self::create_shift_path(shift);
-            match std::fs::create_dir(&path) {
+            match std::fs::create_dir_all(&path) {
                 Ok(_) => (),
                 Err(kind) if kind.kind() == io::ErrorKind::AlreadyExists => (),
                 Err(kind) => return Err(kind.into()),

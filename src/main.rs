@@ -97,7 +97,11 @@ fn get_creation_date(path: &PathBuf) -> Result<SystemTime> {
 
 fn load_pdfs_and_index() -> Result<()> {
     let files = get_timetable_pdf_files()?;
-    fs::create_dir(COLLECTION_PATH)?;
+    match fs::create_dir(COLLECTION_PATH) {
+        Ok(_) => (),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
+        Err(e) => return Err(e.into()),
+    };
     fs::remove_dir_all(COLLECTION_PATH)?;
     let mut timetable_collections = Vec::new();
     for file_path in files.timetable_pdfs.iter().enumerate() {
@@ -115,7 +119,7 @@ fn load_pdfs_and_index() -> Result<()> {
     PdfTimetableCollection::save(&timetable_collections)?;
 
     for timetable in &timetable_collections {
-        OmloopIndex::new_omloop_timetable(timetable);
+        OmloopIndex::new_omloop_timetable(timetable).unwrap();
     }
 
     PdfTimetableCollection::load_to_global()?;
