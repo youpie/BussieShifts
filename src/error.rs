@@ -1,22 +1,22 @@
-use crate::GenResult;
+use crate::prelude::*;
 
 #[allow(dead_code)]
 pub trait OptionResult<T> {
-    fn result(self) -> GenResult<T>;
-    fn result_reason(self, reason: &str) -> GenResult<T>;
+    fn result(self) -> Result<T>;
+    fn result_reason(self, reason: &str) -> Result<T>;
 }
 
 impl<T> OptionResult<T> for Option<T> {
-    fn result(self) -> GenResult<T> {
+    fn result(self) -> Result<T> {
         match self {
             Some(value) => Ok(value),
-            None => Err("Option Unwrap".into()),
+            None => Err(eyre!("Option Unwrap")),
         }
     }
-    fn result_reason(self, reason: &str) -> GenResult<T> {
+    fn result_reason(self, reason: &str) -> Result<T> {
         match self {
             Some(value) => Ok(value),
-            None => Err(reason.into()),
+            None => Err(eyre!("{reason}")),
         }
     }
 }

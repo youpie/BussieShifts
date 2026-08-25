@@ -17,11 +17,13 @@ use time::macros::format_description;
 use time::{Date, OffsetDateTime};
 use walkdir::WalkDir;
 
-use crate::error::OptionResult;
+pub use crate::prelude::*;
 
 extern crate pretty_env_logger;
 #[macro_use]
 extern crate log;
+
+pub mod prelude;
 
 mod collection;
 mod deadhead;
@@ -34,7 +36,6 @@ mod statistics;
 type ValidTimetables = Vec<PdfTimetableCollection>;
 type NextTimetableChangeDate = Option<Date>;
 
-//const PDF_PATH: &str = "Dienstboek";
 const COLLECTION_PATH: &str = "pdf_collection";
 const SHIFT_PATH: &str = "shifts";
 const OMLOOP_PATH: &str = "omlopen";
@@ -43,11 +44,7 @@ const BOOKS_PATH: &str = "Dienstboek";
 
 const CHANGE_FOLDER_NAME: &str = "Wijzigingen";
 
-// static CURRENT_TIMETABLE_DATE: LazyLock<RwLock<Date>> = LazyLock::new(|| RwLock::new(vec![]));
-
 const DATE_FORMAT: &[BorrowedFormatItem<'_>] = format_description!["[day]-[month]-[year]"];
-
-pub type GenResult<T> = Result<T, Box<dyn std::error::Error>>;
 
 #[derive(Deserialize)]
 struct ShiftQuery {
@@ -60,7 +57,7 @@ struct TimetablePaths {
     pub valid_from_files: Vec<PathBuf>,
 }
 
-fn get_timetable_pdf_files() -> GenResult<TimetablePaths> {
+fn get_timetable_pdf_files() -> Result<TimetablePaths> {
     let mut timetable_pdfs = Vec::new();
     let mut updated_timetable_pdfs = Vec::new();
     let mut valid_on_files = Vec::new();
@@ -94,14 +91,14 @@ fn get_timetable_pdf_files() -> GenResult<TimetablePaths> {
     })
 }
 
-fn get_creation_date(path: &PathBuf) -> GenResult<SystemTime> {
+fn get_creation_date(path: &PathBuf) -> Result<SystemTime> {
     Ok(fs::metadata(path)?.created()?)
 }
 
-fn load_pdfs_and_index() -> GenResult<()> {
+fn load_pdfs_and_index() -> Result<()> {
     let files = get_timetable_pdf_files()?;
-    fs::remove_dir_all(COLLECTION_PATH)?;
     fs::create_dir(COLLECTION_PATH)?;
+    fs::remove_dir_all(COLLECTION_PATH)?;
     let mut timetable_collections = Vec::new();
     for file_path in files.timetable_pdfs.iter().enumerate() {
         let collection = PdfTimetableCollection::new_or_extend(
@@ -132,7 +129,7 @@ fn load_pdfs_and_index() -> GenResult<()> {
 fn get_valid_timetables(
     date: Option<Date>,
     append_future_timetables: bool,
-) -> GenResult<(ValidTimetables, NextTimetableChangeDate)> {
+) -> Result<(ValidTimetables, NextTimetableChangeDate)> {
     let collections = PdfTimetableCollection::get_global()?;
     let current_date = match date {
         Some(date) => date,
@@ -200,7 +197,7 @@ fn handle_refresh_request() -> HttpResponse {
 
 #[get("/shift/{shift_number}")]
 async fn get_shift(request: web::Path<String>, query: web::Query<ShiftQuery>) -> impl Responder {
-    info!("Got request for {}", request);
+    debug!("Got request for {}", request);
     let custom_date_option = query
         .date
         .as_ref()
@@ -282,7 +279,7 @@ fn return_error(error: String) -> HttpResponse {
 fn find_pdf_shift(
     shift_timetable_collection: &PdfTimetableCollection,
     shift_data: ShiftData,
-) -> GenResult<Vec<u8>> {
+) -> Result<Vec<u8>> {
     // Get the path of the pdf by getting the file id of the shift data, and using that to find the filename
     let shift_pdf_path = shift_timetable_collection
         .files

@@ -1,12 +1,11 @@
-use std::{fs, io, path::PathBuf};
-
 use serde::{Deserialize, Serialize};
+use std::{fs, io, path::PathBuf};
 use thiserror::Error;
 use time::{Date, Time};
 
-use crate::{
-    COLLECTION_PATH, DATE_FORMAT, GenResult, SHIFT_PATH, collection::PdfTimetableCollection,
-};
+use crate::collection::PdfTimetableCollection;
+
+use super::*;
 
 #[derive(Error, Debug, Serialize, Deserialize, Clone)]
 pub enum ShiftParseError {
@@ -133,13 +132,13 @@ pub struct Shift {
 }
 
 impl Shift {
-    pub fn load(timetable: &PdfTimetableCollection, id: &str) -> GenResult<Self> {
+    pub fn load(timetable: &PdfTimetableCollection, id: &str) -> Result<Self> {
         Ok(serde_json::from_str::<Self>(&Self::load_json(
             timetable, id,
         )?)?)
     }
 
-    pub fn load_json(timetable: &PdfTimetableCollection, id: &str) -> GenResult<String> {
+    pub fn load_json(timetable: &PdfTimetableCollection, id: &str) -> Result<String> {
         let base_path = timetable.start_date.format(DATE_FORMAT)?;
         let path = PathBuf::from(format!(
             "{COLLECTION_PATH}/{base_path}/{SHIFT_PATH}/{id}.json"
@@ -147,13 +146,13 @@ impl Shift {
         Ok(fs::read_to_string(path)?)
     }
 
-    pub fn save_extracted_shifts(shifts: Vec<Self>) -> GenResult<()> {
+    pub fn save_extracted_shifts(shifts: Vec<Self>) -> Result<()> {
         if let Some(shift) = shifts.first() {
             let path = Self::create_shift_path(shift);
             match std::fs::create_dir(&path) {
                 Ok(_) => (),
                 Err(kind) if kind.kind() == io::ErrorKind::AlreadyExists => (),
-                Err(kind) => return Err(Box::new(kind)),
+                Err(kind) => return Err(kind.into()),
             };
             for shift in shifts {
                 let shift_json = serde_json::to_string_pretty(&shift)?;
@@ -169,7 +168,7 @@ impl Shift {
             }
             Ok(())
         } else {
-            Err("No shifts contained".into())
+            Err(eyre!("No shifts contained"))
         }
     }
 

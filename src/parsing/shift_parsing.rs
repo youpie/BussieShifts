@@ -1,40 +1,19 @@
-#![allow(warnings)]
-
-use crate::GenResult;
 use crate::collection::ShiftData;
 use crate::parsing::shift_structs::*;
 use float_ord::FloatOrd;
 use lopdf::Document;
 use regex::Regex;
-use serde::Serialize;
 use std::collections::HashMap;
 use std::ops::Neg;
 use std::path::PathBuf;
-use time::format_description::BorrowedFormatItem;
-use time::macros::format_description;
-use time::{Date, Time, error};
+use time::{Date, Time};
 
-const DATE_FORMAT: &[BorrowedFormatItem<'_>] = format_description!["[day]-[month]-[year]"];
+use super::*;
 
-trait StrTime {
-    fn string_to_time(&self) -> Result<Time, error::Parse>;
-}
-
-impl StrTime for String {
-    fn string_to_time(&self) -> Result<Time, error::Parse> {
-        let format = format_description!("[hour]:[minute]");
-        Ok(Time::parse(self, format)?)
-    }
-}
-
-pub fn parse_pdf(
-    pdf_path: &PathBuf,
-    shift_data: HashMap<String, ShiftData>,
-) -> GenResult<Vec<Shift>> {
+pub fn parse_pdf(pdf_path: &PathBuf, shift_data: HashMap<String, ShiftData>) -> Result<Vec<Shift>> {
     let doc = Document::load(pdf_path)?;
     let pages = doc.get_pages();
     let pagenr_hashmap = reverse_pagenr_hashmap(shift_data);
-    let mut i = 0;
     let mut shifts: Vec<Shift> = vec![];
     for (&page_number, &page_id) in pages.iter() {
         let page_dict = doc.get_object(page_id)?.as_dict()?;
@@ -66,7 +45,6 @@ pub fn parse_pdf(
                 println!("Unexpected type for Contents on page {}", page_number);
             }
         }
-        i += 1;
     }
     Ok(shifts)
 }
@@ -81,7 +59,7 @@ fn reverse_pagenr_hashmap(hashmap: HashMap<String, ShiftData>) -> HashMap<u32, S
     new_hashmap
 }
 
-fn parse_page(page_stream: String, page_number: u32, shift_number: String) -> GenResult<Shift> {
+fn parse_page(page_stream: String, page_number: u32, shift_number: String) -> Result<Shift> {
     let re = Regex::new(r"\((.*?)\)")?; // Match text inside parentheses
     let mut line_elements: Vec<(String, (f32, f32))> = vec![];
     let page_stream_clone = page_stream.clone();
@@ -140,7 +118,7 @@ fn get_line_element(
     offset: f32,
     page_number: u32,
     shift_number: String,
-) -> GenResult<Shift> {
+) -> Result<Shift> {
     let mut line_errors: Vec<ShiftParseError> = vec![];
 
     let mut last_y = items
@@ -267,22 +245,21 @@ fn get_line_information(
     }
     //println!("Line: {}, x: {}",line, current_x);
     if current_y < 50.0 || current_y > 735.0 {
-        if let metadata = line.clone() {
-            identify_metadata(
-                &mut *start_date,
-                &mut *valid_on,
-                &mut *valid_days,
-                &mut *shift_number,
-                &mut *location,
-                metadata,
-                current_y,
-                current_x,
-            )
-            .ok_or(ShiftParseError::MetadataFailure {
-                page_number,
-                line: None,
-            })?;
-        }
+        let metadata = line.clone();
+        identify_metadata(
+            &mut *start_date,
+            &mut *valid_on,
+            &mut *valid_days,
+            &mut *shift_number,
+            &mut *location,
+            metadata,
+            current_y,
+            current_x,
+        )
+        .ok_or(ShiftParseError::MetadataFailure {
+            page_number,
+            line: None,
+        })?;
     } else if current_x >= lijn_lower && current_x <= lijn_upper {
         *lijn_number = Some(line);
     } else if current_x >= omloop_lower && current_x <= omloop_upper {

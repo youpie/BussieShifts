@@ -4,10 +4,11 @@ use serde::{Deserialize, Serialize};
 use time::Date;
 
 use crate::{
-    COLLECTION_PATH, DATE_FORMAT, OMLOOP_PATH,
     collection::PdfTimetableCollection,
     parsing::shift_structs::{Shift, ShiftJob, ShiftValidDay},
 };
+
+use crate::prelude::*;
 
 pub struct OmloopIndex {
     index: HashMap<Omloop, HashMap<ShiftValidDay, u8>>,
@@ -55,7 +56,6 @@ pub struct BusOmloopDay {
 }
 
 type Omloop = usize;
-type Index = u8;
 
 impl BusOmloopDay {
     pub(self) fn new_or_extend(

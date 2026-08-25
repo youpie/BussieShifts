@@ -4,7 +4,9 @@ use actix_web::{HttpResponse, http::header::ContentType};
 use serde::Serialize;
 use time::Date;
 
-use crate::{GenResult, get_valid_timetables};
+use crate::get_valid_timetables;
+
+use crate::prelude::*;
 
 #[derive(Serialize)]
 pub struct IndexShift {
@@ -12,7 +14,7 @@ pub struct IndexShift {
     valid_from: Date,
 }
 
-pub fn get_valid_shifts(date: Option<Date>) -> GenResult<Vec<IndexShift>> {
+pub fn get_valid_shifts(date: Option<Date>) -> Result<Vec<IndexShift>> {
     let mut available_shifts: HashMap<String, (Date, String)> = HashMap::new();
     let valid_timetables = get_valid_timetables(date, false)?.0;
     for current_timetable in valid_timetables {

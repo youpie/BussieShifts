@@ -10,11 +10,9 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use time::Date;
 
-use crate::{
-    COLLECTION_PATH, DATE_FORMAT, GenResult,
-    error::OptionResult,
-    parsing::{shift_parsing::parse_pdf, shift_structs::Shift, valid_on},
-};
+use crate::parsing::{shift_parsing::parse_pdf, shift_structs::Shift, valid_on};
+
+use crate::prelude::*;
 
 static ALL_TIMETABLE_COLLECTIONS: LazyLock<RwLock<Vec<PdfTimetableCollection>>> =
     LazyLock::new(|| RwLock::new(vec![]));
@@ -42,7 +40,7 @@ impl PdfTimetableCollection {
         existing_timetables: &mut Vec<Self>,
         pdf_path: PathBuf,
         file_id: usize,
-    ) -> GenResult<Option<Self>> {
+    ) -> Result<Option<Self>> {
         // Load the PDF document.
         let shift_data_map = ShiftData::load(&pdf_path, file_id)?;
         let parsed_shifts = parse_pdf(&pdf_path, shift_data_map.clone())?;
@@ -100,7 +98,7 @@ impl PdfTimetableCollection {
         new_collections
     }
 
-    pub fn save(collections: &Vec<Self>) -> GenResult<()> {
+    pub fn save(collections: &Vec<Self>) -> Result<()> {
         for collection in collections {
             Shift::save_extracted_shifts(collection.shifts.clone())?;
             let mut output_path = collection.collection_path();
@@ -118,7 +116,7 @@ impl PdfTimetableCollection {
         PathBuf::from(format!("{}/{}", COLLECTION_PATH, valid_from_string))
     }
 
-    pub fn load_to_global() -> GenResult<()> {
+    pub fn load_to_global() -> Result<()> {
         let collections_on_disk = fs::read_dir(COLLECTION_PATH)?;
         let mut collections: Vec<Self> = vec![];
         for file_result in collections_on_disk {
@@ -136,18 +134,18 @@ impl PdfTimetableCollection {
             }
         }
         collections.sort_by_key(|key| key.start_date);
-        *ALL_TIMETABLE_COLLECTIONS.try_write()? = collections;
+        *ALL_TIMETABLE_COLLECTIONS.try_write().ok().result()? = collections;
         Ok(())
     }
 
-    pub fn get_global() -> GenResult<Vec<Self>> {
-        let collections = (*ALL_TIMETABLE_COLLECTIONS.read()?).to_vec();
+    pub fn get_global() -> Result<Vec<Self>> {
+        let collections = (*ALL_TIMETABLE_COLLECTIONS.read().ok().result()?).to_vec();
         Ok(collections)
     }
 }
 
 impl ShiftData {
-    pub fn load(path: &PathBuf, file_id: usize) -> GenResult<HashMap<String, ShiftData>> {
+    pub fn load(path: &PathBuf, file_id: usize) -> Result<HashMap<String, ShiftData>> {
         let doc = Document::load(&path)?;
 
         // Define a regex pattern that finds "Dienst" followed by a trip number.
