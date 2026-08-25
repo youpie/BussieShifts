@@ -1,4 +1,5 @@
 use crate::collection::{PdfTimetableCollection, ShiftData};
+use crate::omloop::OmloopIndex;
 use crate::statistics::handle_stats_request;
 use actix_web::http::header::ContentType;
 use actix_web::{App, HttpResponse, HttpServer, Responder, get, web};
@@ -25,6 +26,7 @@ mod collection;
 mod deadhead;
 mod error;
 mod index;
+mod omloop;
 mod parsing;
 mod statistics;
 
@@ -33,6 +35,8 @@ type NextTimetableChangeDate = Option<Date>;
 
 //const PDF_PATH: &str = "Dienstboek";
 const COLLECTION_PATH: &str = "pdf_collection";
+const SHIFT_PATH: &str = "shifts";
+const OMLOOP_PATH: &str = "omlopen";
 
 const BOOKS_PATH: &str = "Dienstboek";
 
@@ -110,7 +114,12 @@ fn load_pdfs_and_index() -> GenResult<()> {
     }
     timetable_collections =
         PdfTimetableCollection::add_valid_from_data(timetable_collections, files.valid_from_files);
-    PdfTimetableCollection::save(timetable_collections)?;
+    PdfTimetableCollection::save(&timetable_collections)?;
+
+    for timetable in &timetable_collections {
+        OmloopIndex::new_omloop_timetable(timetable);
+    }
+
     PdfTimetableCollection::load_to_global()?;
     Ok(())
 }

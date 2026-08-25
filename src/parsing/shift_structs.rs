@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use time::{Date, Time};
 
-use crate::GenResult;
+use crate::{COLLECTION_PATH, DATE_FORMAT, GenResult, collection::PdfTimetableCollection};
 
 #[derive(Error, Debug, Serialize, Deserialize, Clone)]
 pub enum ShiftParseError {
@@ -27,7 +27,7 @@ pub enum ShiftParseError {
     },
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, Eq, Hash, PartialEq)]
 pub enum ShiftValidDay {
     Monday,
     Tuesday,
@@ -131,7 +131,15 @@ pub struct Shift {
 }
 
 impl Shift {
-    pub fn save_extracted_shifts(shifts: Vec<Self>, path: PathBuf) -> GenResult<()> {
+    pub fn load(timetable: &PdfTimetableCollection, id: &str) -> Option<Self> {
+        let base_path = timetable.start_date.format(DATE_FORMAT).unwrap();
+        let path = PathBuf::from(format!("{COLLECTION_PATH}/{base_path}/{id}.json"));
+        fs::read_to_string(path)
+            .ok()
+            .and_then(|v| serde_json::from_str::<Self>(&v).ok())
+    }
+
+    pub fn save_extracted_shifts(shifts: Vec<Self>) -> GenResult<()> {
         match std::fs::create_dir(&path) {
             Ok(_) => (),
             Err(kind) if kind.kind() == io::ErrorKind::AlreadyExists => (),
@@ -151,4 +159,6 @@ impl Shift {
         }
         Ok(())
     }
+
+    // fn create_shift_dar
 }

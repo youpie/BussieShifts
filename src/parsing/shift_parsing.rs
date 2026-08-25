@@ -318,25 +318,33 @@ fn identify_metadata(
     } else if metadata.contains("Dienst ") {
         let shift_number_temp = metadata.split("Dienst ").last()?.to_owned();
         *shift_number = shift_number_temp.replace(" ", "");
-    } else if metadata.contains("MA") {
-        valid_days.push(ShiftValidDay::Monday);
-    } else if metadata.contains("DI") {
-        valid_days.push(ShiftValidDay::Tuesday);
-    } else if metadata.contains("WO") {
-        valid_days.push(ShiftValidDay::Wednsesday);
-    } else if metadata.contains("DO") {
-        valid_days.push(ShiftValidDay::Thursday);
-    } else if metadata.contains("VR") {
-        valid_days.push(ShiftValidDay::Friday);
-    } else if metadata.contains("ZA") {
-        valid_days.push(ShiftValidDay::Saturday);
-        *valid_on = ShiftValid::Saturday;
-    } else if metadata.contains("ZO") {
-        valid_days.push(ShiftValidDay::Sunday);
-        *valid_on = ShiftValid::Sunday;
     } else if current_y > 760.0 && current_x > 300.0 {
         // warn!("locatie gevonden: {metadata}\ny: {current_y}");
         *location = metadata
+    }
+
+    if metadata_clone.contains("MA") {
+        valid_days.push(ShiftValidDay::Monday);
+    }
+    if metadata_clone.contains("DI") {
+        valid_days.push(ShiftValidDay::Tuesday);
+    }
+    if metadata_clone.contains("WO") {
+        valid_days.push(ShiftValidDay::Wednsesday);
+    }
+    if metadata_clone.contains("DO") {
+        valid_days.push(ShiftValidDay::Thursday);
+    }
+    if metadata_clone.contains("VR") {
+        valid_days.push(ShiftValidDay::Friday);
+    }
+    if metadata_clone.contains("ZA") {
+        valid_days.push(ShiftValidDay::Saturday);
+        *valid_on = ShiftValid::Saturday;
+    }
+    if metadata_clone.contains("ZO") {
+        valid_days.push(ShiftValidDay::Sunday);
+        *valid_on = ShiftValid::Sunday;
     }
 
     //Backwards compatibility
