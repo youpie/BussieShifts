@@ -143,6 +143,7 @@ fn get_line_element(
     let mut shift_number = shift_number;
     let mut location = String::new();
     let mut jobs = vec![];
+    let mut last_job = ShiftJob::default();
     for item in items {
         match get_line_information(
             &mut lijn,
@@ -153,6 +154,7 @@ fn get_line_element(
             &mut naar,
             &mut eind,
             &mut jobs,
+            &mut last_job,
             &mut start_date,
             &mut valid_on,
             &mut valid_days,
@@ -195,6 +197,7 @@ fn get_line_information(
     naar: &mut Option<String>,
     eind: &mut Option<String>,
     jobs: &mut Vec<ShiftJob>,
+    last_job: &mut ShiftJob,
     start_date: &mut Date,
     valid_on: &mut ShiftValid,
     valid_days: &mut Vec<ShiftValidDay>,
@@ -222,7 +225,7 @@ fn get_line_information(
     let eind_lower = 490.0 - 83.0 - offset;
     if last_y != current_y {
         //println!("Job gevonden!\nLijn {lijn:?}, omloop {omloop:?}, rit {rit:?}, van {van:?}, naar {naar:?}, begint om {start:?} en stopt om {eind:?}");
-        let job = job_creator(
+        let mut job = job_creator(
             lijn_number.clone(),
             omloop.clone(),
             rit.clone(),
@@ -231,6 +234,13 @@ fn get_line_information(
             van.clone(),
             naar.clone(),
         )?;
+
+        // Logic to add Omloopnummer to driving job without omloopnummer if last job was also a driving job
+        if job.job_type.is_vehicle_involved() && job.omloop.is_none() {
+            job.omloop = last_job.omloop;
+        }
+        *last_job = job.clone();
+
         //println!("{:?}", &job);
         if !job.empty() {
             jobs.push(job);

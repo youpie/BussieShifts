@@ -80,21 +80,35 @@ pub enum JobMessageType {
     Other(String),
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Default)]
 pub enum JobType {
-    Rijden { drive_type: JobDrivingType },
+    Rijden {
+        drive_type: JobDrivingType,
+    },
     Pauze,
     Onderbreking,
     OpAfstap,
     RijklaarMaken,
     StallenAfmelden,
-    Melding { message: JobMessageType },
+    Melding {
+        message: JobMessageType,
+    },
     LoopReis,
     Reserve,
+    #[default]
     Unknown,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+impl JobType {
+    pub fn is_vehicle_involved(&self) -> bool {
+        matches!(
+            self,
+            JobType::Rijden { drive_type: _ } | JobType::RijklaarMaken | JobType::StallenAfmelden
+        )
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ShiftJob {
     pub job_type: JobType,
     pub start: Option<Time>,
