@@ -1,11 +1,15 @@
 use std::{collections::HashMap, fs, path::PathBuf};
 
+use actix_web::{HttpResponse, Responder, get, http::header::ContentType, web};
 use serde::{Deserialize, Serialize};
-use time::Date;
+use time::{Date, OffsetDateTime};
 
 use crate::{
+    ShiftQuery,
     collection::PdfTimetableCollection,
+    get_valid_timetables,
     parsing::shift_structs::{Shift, ShiftJob, ShiftValidDay},
+    return_error,
 };
 
 use crate::prelude::*;
@@ -22,7 +26,7 @@ pub struct OmloopIndex {
 impl OmloopIndex {
     /// Will also save omloops and Self to disk
     pub fn new_omloop_timetable(timetable: &PdfTimetableCollection) -> Result<Self> {
-        debug!("Indexing omlopen");
+        debug!("Indexing omlopen for timetable {}", timetable.start_date);
         let mut omlopen_map = HashMap::new();
         for shift in &timetable.pages {
             if let Some(shift) = Shift::load(timetable, &shift.0).ok() {
@@ -84,21 +88,45 @@ impl OmloopIndex {
         path
     }
 
-    pub fn get(omloop: usize, day: u8, timetable: &PdfTimetableCollection) -> Result<BusOmloopDay> {
+    pub fn get_omloop(
+        omloop: usize,
+        day: u8,
+        timetable: &PdfTimetableCollection,
+    ) -> Result<String> {
         let index_map = Self::load(timetable)?;
         let index = *index_map
             .index
             .get(&omloop)
             .and_then(|v| v.get(&day))
             .result_reason("No omloop report found for that day")?;
-        Ok(BusOmloopDay::load(omloop, timetable.start_date, index)?)
+        Ok(BusOmloopDay::load_string(
+            omloop,
+            timetable.start_date,
+            index,
+        )?)
+    }
+}
+
+/// Added the shift number to the omloop
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct ShiftJobExtended {
+    job: ShiftJob,
+    shift: String,
+}
+
+impl ShiftJobExtended {
+    fn from_job(shift: &Shift, job: ShiftJob) -> Self {
+        Self {
+            job,
+            shift: shift.shift_nr.clone(),
+        }
     }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BusOmloopDay {
     omloop: usize,
-    jobs: Vec<ShiftJob>,
+    jobs: Vec<ShiftJobExtended>,
     index: u8,
 }
 
@@ -113,12 +141,14 @@ impl BusOmloopDay {
             if let Some(job_omloop) = job.omloop
                 && let Some(omloop_dag) = omlopen.get_mut(&(job_omloop, shift.valid_days.clone()))
             {
-                omloop_dag.jobs.push(job.clone());
+                omloop_dag
+                    .jobs
+                    .push(ShiftJobExtended::from_job(&shift, job.clone()));
             } else if let Some(job_omloop) = job.omloop {
                 // If the omloop is not found in the Hasmap, we create a new instance
                 let new_omloop_day = Self {
                     omloop: job_omloop,
-                    jobs: vec![job.clone()],
+                    jobs: vec![ShiftJobExtended::from_job(&shift, job.clone())],
                     index: 0,
                 };
                 omlopen.insert((job_omloop, shift.valid_days.clone()), new_omloop_day);
@@ -126,9 +156,15 @@ impl BusOmloopDay {
         }
     }
 
-    pub(self) fn load(omloop: Omloop, start_date: Date, index: u8) -> Result<Self> {
+    pub(self) fn _load(omloop: Omloop, start_date: Date, index: u8) -> Result<Self> {
+        Ok(serde_json::from_str(&Self::load_string(
+            omloop, start_date, index,
+        )?)?)
+    }
+
+    pub fn load_string(omloop: Omloop, start_date: Date, index: u8) -> Result<String> {
         let path = Self::get_path(omloop, start_date, index);
-        Ok(serde_json::from_str(&fs::read_to_string(path)?)?)
+        Ok(fs::read_to_string(path)?)
     }
 
     pub(self) fn save(&self, start_date: Date, index: u8) -> Result<()> {
@@ -138,13 +174,12 @@ impl BusOmloopDay {
     }
 
     pub(self) fn sort_jobs(&mut self) {
-        self.jobs.sort_by_key(|k| k.start);
+        self.jobs.sort_by_key(|k| k.job.start);
     }
 
     pub(self) fn get_path(omloop: Omloop, start_date: Date, index: u8) -> PathBuf {
         let mut path = get_base_path(start_date);
         path.push(Self::get_filename(omloop, index));
-        debug!("{path:?}");
         path
     }
 
@@ -156,4 +191,29 @@ impl BusOmloopDay {
 fn get_base_path(start_date: Date) -> PathBuf {
     let start_date = start_date.format(DATE_FORMAT).unwrap();
     PathBuf::from(format!("{COLLECTION_PATH}/{start_date}/{OMLOOP_PATH}/"))
+}
+
+#[get("/omloop/{omloop_number}")]
+pub async fn get_omloop(
+    request: web::Path<usize>,
+    query: web::Query<ShiftQuery>,
+) -> impl Responder {
+    let date = query
+        .date
+        .as_ref()
+        .and_then(|date_string| Date::parse(date_string, DATE_FORMAT).ok())
+        .unwrap_or(OffsetDateTime::now_utc().date());
+
+    let day_of_the_week = date.weekday() as u8;
+    let timetable = match get_valid_timetables(Some(date), false) {
+        Ok(timetable) if let Some(first_timetable) = timetable.0.first().cloned() => {
+            first_timetable
+        }
+        _ => return return_error("Could not get timetable".to_string()),
+    };
+
+    match OmloopIndex::get_omloop(request.into_inner(), day_of_the_week, &timetable) {
+        Ok(v) => HttpResponse::Ok().content_type(ContentType::json()).body(v),
+        Err(e) => return_error(e.to_string()),
+    }
 }

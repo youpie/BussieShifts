@@ -1,5 +1,5 @@
 use crate::collection::{PdfTimetableCollection, ShiftData};
-use crate::omloop::OmloopIndex;
+use crate::omloop::{OmloopIndex, get_omloop};
 use crate::parsing::shift_structs::Shift;
 use crate::statistics::handle_stats_request;
 use actix_web::http::header::ContentType;
@@ -274,6 +274,7 @@ async fn get_shift(request: web::Path<String>, query: web::Query<ShiftQuery>) ->
 }
 
 fn return_error(error: String) -> HttpResponse {
+    warn!("Error occured: {error}");
     HttpResponse::InternalServerError().body(format!(
         "<h1>Sorry, something went wrong loading that shift.</h1><br>error: {}",
         error
@@ -339,7 +340,7 @@ async fn main() -> std::io::Result<()> {
     let _ = fs::write("pdf_hash", current_hash.to_le_bytes());
     PdfTimetableCollection::load_to_global().unwrap();
 
-    HttpServer::new(move || App::new().service(get_shift))
+    HttpServer::new(move || App::new().service(get_shift).service(get_omloop))
         .bind("0.0.0.0:8080")?
         .run()
         .await
