@@ -14,6 +14,16 @@ use crate::{
 
 use crate::prelude::*;
 
+/*
+Dingen die ik wil implementeren:
+- De Omloop index opslaan als bytes, ism JSON
+- De OmloopJob uitbreiden om niet herhaalde velden te tonen
+- ImpliedOmloop toevoegen aan Job
+- Gebruik standaard Weekdays van de time lib
+
+gedaan:
+- Aan AI vragen hoe de new_omloop_timetable beter geschreven kan worden*/
+
 type Omloop = usize;
 type Index = u8;
 type DayOfTheWeek = u8;
@@ -29,39 +39,39 @@ impl OmloopIndex {
         debug!("Indexing omlopen for timetable {}", timetable.start_date);
         let mut omlopen_map = HashMap::new();
         for shift in &timetable.pages {
-            if let Some(shift) = Shift::load(timetable, &shift.0).ok() {
-                BusOmloopDay::new_or_extend(&mut omlopen_map, shift);
-            } else {
-                warn!("Skipped loading {}", shift.0);
+            match Shift::load(timetable, &shift.0) {
+                Ok(shift) => BusOmloopDay::new_or_extend(&mut omlopen_map, shift),
+                Err(e) => warn!("Skipped loading {}, {}", shift.0, e.to_string()),
             }
         }
 
         // create the valid days index map
-        let mut valid_index_map = HashMap::new();
-        let mut omloop_current_index: HashMap<Omloop, Index> = HashMap::new();
+        let mut index_map_for_omloop = HashMap::new();
+        let mut current_index_for_omloop: HashMap<Omloop, Index> = HashMap::new();
         for mut omloop in omlopen_map {
             omloop.1.sort_jobs();
-            let index = if let Some(index) = omloop_current_index.get(&omloop.0.0) {
-                let temp_index = *index;
-                omloop_current_index.insert(omloop.0.0, temp_index + 1);
-                temp_index + 1
-            } else {
-                omloop_current_index.insert(omloop.0.0, 0);
-                0
-            };
+            // Find the current valid index for a given omloop
+            // A new index is for a new valid day array of an omloop
+            // Say an omloop is valid on    MA/DI/WO
+            // And on                       DO/VR
+            // then MA and DI and WO have index 0
+            // And DO and VR     have index 1
+            // ZA/ZO simply have no entry as the omloop is not used on that day
+            let index_entry = current_index_for_omloop.entry(omloop.0.0).or_insert(0);
             for valid_day in omloop.0.1 {
-                if !valid_index_map.contains_key(&omloop.0.0) {
-                    valid_index_map.insert(omloop.0.0, HashMap::new());
-                }
-                if let Some(valid_map) = valid_index_map.get_mut(&omloop.0.0) {
-                    valid_map.insert(valid_day as u8, index);
-                }
+                // For every day this omloop with this day array is valid, add an entry to the map
+                // Where the day of the week is the key and the index code is the value
+                index_map_for_omloop
+                    .entry(omloop.0.0)
+                    .or_insert(HashMap::new())
+                    .insert(valid_day as u8, *index_entry);
             }
-            omloop.1.save(timetable.start_date, index)?;
+            omloop.1.save(timetable.start_date, *index_entry)?;
+            *index_entry += 1;
         }
 
         let index_map = Self {
-            index: valid_index_map,
+            index: index_map_for_omloop,
         };
 
         index_map.save(timetable)?;
