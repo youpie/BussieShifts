@@ -2,13 +2,13 @@ use std::{collections::HashMap, fs, path::PathBuf};
 
 use actix_web::{HttpResponse, Responder, get, http::header::ContentType, web};
 use serde::{Deserialize, Serialize};
-use time::{Date, OffsetDateTime};
+use time::{Date, OffsetDateTime, Time};
 
 use crate::{
     ShiftQuery,
     collection::PdfTimetableCollection,
     get_valid_timetables,
-    parsing::shift_structs::{Shift, ShiftJob, ShiftValidDay},
+    parsing::shift_structs::{JobType, Shift, ShiftJob, ShiftValidDay},
     return_error,
 };
 
@@ -29,11 +29,11 @@ type Index = u8;
 type DayOfTheWeek = u8;
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct OmloopIndex {
-    index: HashMap<Omloop, HashMap<DayOfTheWeek, Index>>,
+pub struct OmloopDayIndex {
+    day_indexes: HashMap<Omloop, HashMap<DayOfTheWeek, Index>>,
 }
 
-impl OmloopIndex {
+impl OmloopDayIndex {
     /// Will also save omloops and Self to disk
     pub fn new_omloop_timetable(timetable: &PdfTimetableCollection) -> Result<Self> {
         debug!("Indexing omlopen for timetable {}", timetable.start_date);
@@ -71,7 +71,7 @@ impl OmloopIndex {
         }
 
         let index_map = Self {
-            index: index_map_for_omloop,
+            day_indexes: index_map_for_omloop,
         };
 
         index_map.save(timetable)?;
@@ -105,7 +105,7 @@ impl OmloopIndex {
     ) -> Result<String> {
         let index_map = Self::load(timetable)?;
         let index = *index_map
-            .index
+            .day_indexes
             .get(&omloop)
             .and_then(|v| v.get(&day))
             .result_reason("No omloop report found for that day")?;
@@ -120,15 +120,25 @@ impl OmloopIndex {
 /// Added the shift number to the omloop
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct ShiftJobExtended {
-    job: ShiftJob,
+    job_type: JobType,
+    start: Option<Time>,
+    end: Option<Time>,
+    start_location: Option<String>,
+    end_location: Option<String>,
+    rit: Option<usize>,
     shift: String,
 }
 
 impl ShiftJobExtended {
     fn from_job(shift: &Shift, job: ShiftJob) -> Self {
         Self {
-            job,
-            shift: shift.shift_nr.clone(),
+            job_type: job.job_type,
+            start: job.start,
+            end: job.end,
+            start_location: job.start_location,
+            end_location: job.end_location,
+            rit: job.rit,
+            shift: shift.shift_nr.to_owned(),
         }
     }
 }
@@ -137,7 +147,7 @@ impl ShiftJobExtended {
 pub struct BusOmloopDay {
     omloop: usize,
     jobs: Vec<ShiftJobExtended>,
-    index: u8,
+    day_index: u8,
 }
 
 impl BusOmloopDay {
@@ -148,18 +158,18 @@ impl BusOmloopDay {
         for job in &shift.job {
             // If the omloop of the job is found in the OmloopDay hashmap. We add that job to that OmloopDay
             // We also need to make sure that it is of the same index
-            if let Some(job_omloop) = job.omloop
+            if let Some(job_omloop) = job.omloop.or(job.assumed_omloop)
                 && let Some(omloop_dag) = omlopen.get_mut(&(job_omloop, shift.valid_days.clone()))
             {
                 omloop_dag
                     .jobs
                     .push(ShiftJobExtended::from_job(&shift, job.clone()));
-            } else if let Some(job_omloop) = job.omloop {
+            } else if let Some(job_omloop) = job.omloop.or(job.assumed_omloop) {
                 // If the omloop is not found in the Hasmap, we create a new instance
                 let new_omloop_day = Self {
                     omloop: job_omloop,
                     jobs: vec![ShiftJobExtended::from_job(&shift, job.clone())],
-                    index: 0,
+                    day_index: 0,
                 };
                 omlopen.insert((job_omloop, shift.valid_days.clone()), new_omloop_day);
             }
@@ -184,7 +194,7 @@ impl BusOmloopDay {
     }
 
     pub(self) fn sort_jobs(&mut self) {
-        self.jobs.sort_by_key(|k| k.job.start);
+        self.jobs.sort_by_key(|k| k.start);
     }
 
     pub(self) fn get_path(omloop: Omloop, start_date: Date, index: u8) -> PathBuf {
@@ -222,7 +232,7 @@ pub async fn get_omloop(
         _ => return return_error("Could not get timetable".to_string()),
     };
 
-    match OmloopIndex::get_omloop(request.into_inner(), day_of_the_week, &timetable) {
+    match OmloopDayIndex::get_omloop(request.into_inner(), day_of_the_week, &timetable) {
         Ok(v) => HttpResponse::Ok().content_type(ContentType::json()).body(v),
         Err(e) => return_error(e.to_string()),
     }

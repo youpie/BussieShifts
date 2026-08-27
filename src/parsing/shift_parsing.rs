@@ -237,7 +237,7 @@ fn get_line_information(
 
         // Logic to add Omloopnummer to driving job without omloopnummer if last job was also a driving job
         if job.job_type.is_vehicle_involved() && job.omloop.is_none() {
-            job.omloop = last_job.omloop;
+            job.assumed_omloop = last_job.omloop.or(last_job.assumed_omloop);
         }
         *last_job = job.clone();
 
@@ -411,6 +411,7 @@ fn job_creator(
         start_location: van,
         end_location: naar,
         omloop: omloop_number,
+        assumed_omloop: None,
         rit: rit_number,
     })
 }

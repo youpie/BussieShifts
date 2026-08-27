@@ -1,5 +1,5 @@
 use crate::collection::{PdfTimetableCollection, ShiftData};
-use crate::omloop::{OmloopIndex, get_omloop};
+use crate::omloop::{OmloopDayIndex, get_omloop};
 use crate::parsing::shift_structs::Shift;
 use crate::statistics::handle_stats_request;
 use actix_web::http::header::ContentType;
@@ -119,7 +119,7 @@ fn load_pdfs_and_index() -> Result<()> {
     PdfTimetableCollection::save(&timetable_collections)?;
 
     for timetable in &timetable_collections {
-        OmloopIndex::new_omloop_timetable(timetable).unwrap();
+        OmloopDayIndex::new_omloop_timetable(timetable).unwrap();
     }
 
     PdfTimetableCollection::load_to_global()?;

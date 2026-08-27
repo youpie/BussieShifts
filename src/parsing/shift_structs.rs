@@ -116,6 +116,7 @@ pub struct ShiftJob {
     pub start_location: Option<String>,
     pub end_location: Option<String>, // If none, it's the same as start
     pub omloop: Option<usize>,
+    pub assumed_omloop: Option<usize>,
     pub rit: Option<usize>,
 }
 
