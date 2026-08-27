@@ -16,11 +16,11 @@ Parse en serve Transdev dienstbriefjes
 5. party
 
 # How to use valid_on.txt
-Sometimes a timetable is valid again after another timetable was valid, in this case valid_on.txt can be used to tell BussieShift that a timetable is valid multiple times. If a file is started with a `.` it means the valid on date included on the PDF itself should be ignored. Every line after that should include a date in `DD-MM-YYYY` format. On that day the shift will be treated as new
+Sometimes a timetable is valid again after another timetable was valid, in this case valid_on.txt can be used to tell BussieShift that a timetable is valid multiple times. If a file is started with a `.` it means the valid on date included on the PDF itself should be ignored. Every line after that should include a date in `DD-MM-YYYY` format. On that day the shift will be treated as new. The first line should specify the date of the _ingangsdatum_ of the actual dienstregeling
 
 **Example**
 ```
-.
+15-02-2026 <- The original dienstregeling starts on this date
 12-12-2026
 01-02-2027
 ...
