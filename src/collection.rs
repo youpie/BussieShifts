@@ -73,7 +73,7 @@ impl PdfTimetableCollection {
     }
 
     pub fn add_valid_from_data(
-        collections: Vec<Self>,
+        current_timetable_collections: Vec<Self>,
         valid_from_paths: Vec<PathBuf>,
     ) -> Vec<Self> {
         let mut valid_froms = Vec::new();
@@ -81,21 +81,22 @@ impl PdfTimetableCollection {
             valid_froms.push(valid_on::get_timetable_valid_on(valid_from_path));
         }
 
-        let mut new_collections = Vec::new();
-        for mut collection in collections {
+        let mut new_timetable_collections = Vec::new();
+        for mut timetable in current_timetable_collections {
             if let Some(valid_from) = valid_froms
                 .iter()
-                .find(|date| date.first() == Some(&collection.start_date))
+                .find(|date| date.first() == Some(&timetable.start_date))
+            // If the first date in the valid_from file is equal to the start date of the timetable, that valid_form file is associated with that timetable
             {
                 debug!(
                     "Found matching valid_from file for timetable {:?}",
                     valid_from.first()
                 );
-                collection.valid_from = valid_from.clone();
+                timetable.valid_from = valid_from.clone();
             }
-            new_collections.push(collection);
+            new_timetable_collections.push(timetable);
         }
-        new_collections
+        new_timetable_collections
     }
 
     pub fn save(collections: &Vec<Self>) -> Result<()> {
@@ -141,6 +142,17 @@ impl PdfTimetableCollection {
     pub fn get_global() -> Result<Vec<Self>> {
         let collections = (*ALL_TIMETABLE_COLLECTIONS.read().ok().result()?).to_vec();
         Ok(collections)
+    }
+
+    // Will return the normal `start_date` if `valid_from` is empty
+    pub fn base_start(&self) -> Date {
+        match self.valid_from.first() {
+            Some(base) => base.clone(),
+            None => {
+                warn!("Got request for base start date, was unable to aqquire");
+                self.start_date
+            }
+        }
     }
 }
 

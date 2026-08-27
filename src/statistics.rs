@@ -100,6 +100,6 @@ pub fn handle_stats_request(date: Option<Date>) -> HttpResponse {
                 .content_type(ContentType::json())
                 .body(json)
         }
-        Err(err) => return_error(err.to_string()),
+        Err(err) => return_error(err),
     }
 }

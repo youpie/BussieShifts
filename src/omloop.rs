@@ -1,6 +1,7 @@
 use std::{collections::HashMap, fs, path::PathBuf};
 
 use actix_web::{HttpResponse, Responder, get, http::header::ContentType, web};
+use color_eyre::Section;
 use serde::{Deserialize, Serialize};
 use time::{Date, OffsetDateTime, Time, Weekday};
 
@@ -14,16 +15,6 @@ use crate::{
 
 use crate::prelude::*;
 
-/*
-Dingen die ik wil implementeren:
-- De Omloop index opslaan als bytes, ism JSON
-- De OmloopJob uitbreiden om niet herhaalde velden te tonen
-- ImpliedOmloop toevoegen aan Job
-- Gebruik standaard Weekdays van de time lib
-
-gedaan:
-- Aan AI vragen hoe de new_omloop_timetable beter geschreven kan worden*/
-
 type Omloop = usize;
 type Index = u8;
 type DayOfTheWeek = u8;
@@ -36,7 +27,7 @@ pub struct OmloopDayIndex {
 impl OmloopDayIndex {
     /// Will also save omloops and Self to disk
     pub fn new_omloop_timetable(timetable: &PdfTimetableCollection) -> Result<Self> {
-        debug!("Indexing omlopen for timetable {}", timetable.start_date);
+        debug!("Indexing omlopen for timetable {}", timetable.base_start());
         let mut omlopen_map = HashMap::new();
         for shift in &timetable.pages {
             match Shift::load(timetable, &shift.0) {
@@ -66,7 +57,7 @@ impl OmloopDayIndex {
                     .or_insert(HashMap::new())
                     .insert(valid_day as u8, *index_entry);
             }
-            omloop.1.save(timetable.start_date, *index_entry)?;
+            omloop.1.save(timetable.base_start(), *index_entry)?;
             *index_entry += 1;
         }
 
@@ -79,23 +70,30 @@ impl OmloopDayIndex {
     }
 
     fn save(&self, timetable: &PdfTimetableCollection) -> Result<()> {
-        let path = Self::path(timetable);
-        _ = std::fs::create_dir_all(get_base_path(timetable.start_date));
-        Ok(fs::write(path, serde_json::to_string(self)?).wrap_err("Failed to save OmloopIndex")?)
+        _ = std::fs::create_dir_all(get_base_path(timetable.base_start()));
+        let path = Self::path(timetable, false);
+        fs::write(path, serde_json::to_string(self)?).note("Failed to save OmloopIndex")?;
+        let path = Self::path(timetable, true);
+        fs::write(path, postcard::to_allocvec(self)?)?;
+        Ok(())
     }
 
     fn load(timetable: &PdfTimetableCollection) -> Result<Self> {
-        let path = Self::path(timetable);
-        Ok(serde_json::from_str(
-            &fs::read_to_string(&path)
-                .wrap_err(format!("Failed to read OmloopIndex: {:?}", path))?,
+        let path = Self::path(timetable, true);
+        debug!("Trying to load timetable {path:?}");
+        Ok(postcard::from_bytes(
+            &fs::read(&path).note(format!("Failed to read OmloopIndex: {:?}", path))?,
         )
-        .wrap_err("Failed to parse OmloopIndex")?)
+        .note("Failed to parse OmloopIndex")?)
     }
 
-    fn path(timetable: &PdfTimetableCollection) -> PathBuf {
-        let mut path = BusOmloopDay::get_path(0, timetable.start_date, 0);
-        path.set_file_name("index.json");
+    fn path(timetable: &PdfTimetableCollection, binary: bool) -> PathBuf {
+        let mut path = BusOmloopDay::get_path(0, timetable.base_start(), 0);
+        path.set_file_name("index");
+        path.set_extension(match binary {
+            true => "bin",
+            false => "json",
+        });
         path
     }
 
@@ -112,7 +110,7 @@ impl OmloopDayIndex {
             .result_reason("No omloop report found for that day")?;
         Ok(BusOmloopDay::load_string(
             omloop,
-            timetable.start_date,
+            timetable.base_start(),
             index,
         )?)
     }
@@ -185,6 +183,7 @@ impl BusOmloopDay {
 
     pub fn load_string(omloop: Omloop, start_date: Date, index: u8) -> Result<String> {
         let path = Self::get_path(omloop, start_date, index);
+        debug!("Trying to load omloop {path:?}");
         Ok(fs::read_to_string(path)?)
     }
 
@@ -229,11 +228,11 @@ pub async fn get_omloop(
 
     let timetable = match get_valid_timetables(Some(date), false) {
         Ok(timetable) if let Some(first_timetable) = timetable.0.last().cloned() => first_timetable,
-        _ => return return_error("Could not get timetable".to_string()),
+        _ => return return_error(eyre!("Could not get timetable")),
     };
 
     match OmloopDayIndex::get_omloop(request.into_inner(), day_of_the_week, &timetable) {
         Ok(v) => HttpResponse::Ok().content_type(ContentType::json()).body(v),
-        Err(e) => return_error(e.to_string()),
+        Err(e) => return_error(e),
     }
 }

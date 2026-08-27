@@ -4,6 +4,7 @@ use crate::parsing::shift_structs::Shift;
 use crate::statistics::handle_stats_request;
 use actix_web::http::header::ContentType;
 use actix_web::{App, HttpResponse, HttpServer, Responder, get, web};
+use color_eyre::eyre;
 use index::handle_index_request;
 use qpdf::QPdf;
 use serde::Deserialize;
@@ -222,7 +223,7 @@ async fn get_shift(request: web::Path<String>, query: web::Query<ShiftQuery>) ->
     let mut valid_timetables =
         match get_valid_timetables(custom_date_option, add_upcoming_timetables) {
             Ok(result) => result.0,
-            Err(err) => return return_error(err.to_string()),
+            Err(err) => return return_error(err),
         };
 
     let mut shift_split = request_uppercase.split(".");
@@ -260,7 +261,7 @@ async fn get_shift(request: web::Path<String>, query: web::Query<ShiftQuery>) ->
             Ok(json) => HttpResponse::Ok()
                 .content_type(ContentType::json())
                 .body(json),
-            Err(err) => return_error(err.to_string()),
+            Err(err) => return_error(err),
         }
     } else {
         info!("Got PDF request for shift {request_uppercase}");
@@ -268,13 +269,13 @@ async fn get_shift(request: web::Path<String>, query: web::Query<ShiftQuery>) ->
             Ok(bytes) => HttpResponse::Ok()
                 .content_type("application/pdf")
                 .body(bytes),
-            Err(err) => return_error(err.to_string()),
+            Err(err) => return_error(err),
         }
     }
 }
 
-fn return_error(error: String) -> HttpResponse {
-    warn!("Error occured: {error}");
+fn return_error(error: eyre::Report) -> HttpResponse {
+    warn!("Error occured: {error:#?}");
     HttpResponse::InternalServerError().body(format!(
         "<h1>Sorry, something went wrong loading that shift.</h1><br>error: {}",
         error
@@ -319,18 +320,23 @@ async fn main() -> std::io::Result<()> {
     let _previous_hash_option = fs::read("pdf_hash")
         .ok()
         .and_then(|bytes| Some(u64::from_le_bytes(bytes.try_into().unwrap())));
-    #[cfg(not(debug_assertions))]
+    // #[cfg(not(debug_assertions))]
     {
         if let Some(previous_hash) = _previous_hash_option {
             if previous_hash != current_hash {
                 warn!("Hash is changed, reindexing files");
-                load_pdfs_and_index();
+                load_pdfs_and_index().unwrap();
             } else {
                 info!("Hash is the same, so wont reindex");
+                if let Err(e) = PdfTimetableCollection::load_to_global() {
+                    warn!("Loading the timetables has failed with errror {e:#?}. Will Reindex");
+                    load_pdfs_and_index().unwrap();
+                }
             }
         } else {
             error!("Could not find previous hash, reindexing");
             load_pdfs_and_index().unwrap();
+            PdfTimetableCollection::load_to_global().unwrap();
         }
     }
     #[cfg(debug_assertions)]
@@ -338,7 +344,6 @@ async fn main() -> std::io::Result<()> {
         load_pdfs_and_index().unwrap();
     }
     let _ = fs::write("pdf_hash", current_hash.to_le_bytes());
-    PdfTimetableCollection::load_to_global().unwrap();
 
     HttpServer::new(move || App::new().service(get_shift).service(get_omloop))
         .bind("0.0.0.0:8080")?
