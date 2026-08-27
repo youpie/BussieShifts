@@ -158,20 +158,20 @@ impl BusOmloopDay {
         for job in &shift.job {
             // If the omloop of the job is found in the OmloopDay hashmap. We add that job to that OmloopDay
             // We also need to make sure that it is of the same index
-            if let Some(job_omloop) = job.omloop.or(job.assumed_omloop)
-                && let Some(omloop_dag) = omlopen.get_mut(&(job_omloop, shift.valid_days.clone()))
-            {
-                omloop_dag
-                    .jobs
-                    .push(ShiftJobExtended::from_job(&shift, job.clone()));
-            } else if let Some(job_omloop) = job.omloop.or(job.assumed_omloop) {
-                // If the omloop is not found in the Hasmap, we create a new instance
-                let new_omloop_day = Self {
-                    omloop: job_omloop,
-                    jobs: vec![ShiftJobExtended::from_job(&shift, job.clone())],
-                    day_index: 0,
-                };
-                omlopen.insert((job_omloop, shift.valid_days.clone()), new_omloop_day);
+            if let Some(job_omloop) = job.omloop.or(job.assumed_omloop) {
+                if let Some(omloop_dag) = omlopen.get_mut(&(job_omloop, shift.valid_days.clone())) {
+                    omloop_dag
+                        .jobs
+                        .push(ShiftJobExtended::from_job(&shift, job.clone()));
+                } else {
+                    // If the omloop is not found in the Hasmap, we create a new instance
+                    let new_omloop_day = Self {
+                        omloop: job_omloop,
+                        jobs: vec![ShiftJobExtended::from_job(&shift, job.clone())],
+                        day_index: 0,
+                    };
+                    omlopen.insert((job_omloop, shift.valid_days.clone()), new_omloop_day);
+                }
             }
         }
     }
