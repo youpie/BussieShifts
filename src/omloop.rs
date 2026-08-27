@@ -2,7 +2,7 @@ use std::{collections::HashMap, fs, path::PathBuf};
 
 use actix_web::{HttpResponse, Responder, get, http::header::ContentType, web};
 use serde::{Deserialize, Serialize};
-use time::{Date, OffsetDateTime, Time};
+use time::{Date, OffsetDateTime, Time, Weekday};
 
 use crate::{
     ShiftQuery,
@@ -86,10 +86,11 @@ impl OmloopDayIndex {
 
     fn load(timetable: &PdfTimetableCollection) -> Result<Self> {
         let path = Self::path(timetable);
-        Ok(
-            serde_json::from_str(&fs::read_to_string(path).wrap_err("Failed to read OmloopIndex")?)
-                .wrap_err("Failed to parse OmloopIndex")?,
+        Ok(serde_json::from_str(
+            &fs::read_to_string(&path)
+                .wrap_err(format!("Failed to read OmloopIndex: {:?}", path))?,
         )
+        .wrap_err("Failed to parse OmloopIndex")?)
     }
 
     fn path(timetable: &PdfTimetableCollection) -> PathBuf {
@@ -100,14 +101,14 @@ impl OmloopDayIndex {
 
     pub fn get_omloop(
         omloop: usize,
-        day: u8,
+        day: Weekday,
         timetable: &PdfTimetableCollection,
     ) -> Result<String> {
         let index_map = Self::load(timetable)?;
         let index = *index_map
             .day_indexes
             .get(&omloop)
-            .and_then(|v| v.get(&day))
+            .and_then(|v| v.get(&(day as u8)))
             .result_reason("No omloop report found for that day")?;
         Ok(BusOmloopDay::load_string(
             omloop,
@@ -224,11 +225,10 @@ pub async fn get_omloop(
         .and_then(|date_string| Date::parse(date_string, DATE_FORMAT).ok())
         .unwrap_or(OffsetDateTime::now_utc().date());
 
-    let day_of_the_week = date.weekday() as u8;
+    let day_of_the_week = date.weekday();
+
     let timetable = match get_valid_timetables(Some(date), false) {
-        Ok(timetable) if let Some(first_timetable) = timetable.0.first().cloned() => {
-            first_timetable
-        }
+        Ok(timetable) if let Some(first_timetable) = timetable.0.last().cloned() => first_timetable,
         _ => return return_error("Could not get timetable".to_string()),
     };
 

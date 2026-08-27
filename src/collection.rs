@@ -88,7 +88,7 @@ impl PdfTimetableCollection {
                 .find(|date| date.first() == Some(&collection.start_date))
             {
                 debug!(
-                    "Found matching valid form file for date {:?}",
+                    "Found matching valid_from file for timetable {:?}",
                     valid_from.first()
                 );
                 collection.valid_from = valid_from.clone();
