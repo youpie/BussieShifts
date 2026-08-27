@@ -31,7 +31,8 @@ pub struct PdfTimetableCollection {
     pub files: HashMap<usize, String>,
     pub pages: HashMap<String, ShiftData>,
     #[serde(skip)]
-    shifts: Vec<Shift>,
+    /// Will be skipped during deserialization
+    pub shifts: Vec<Shift>,
 }
 
 impl PdfTimetableCollection {

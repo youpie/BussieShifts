@@ -1,5 +1,5 @@
 use crate::collection::{PdfTimetableCollection, ShiftData};
-use crate::omloop::{OmloopDayIndex, get_omloop};
+use crate::omloop::{OmloopDayIndex, get_omloop, get_omloop_overview};
 use crate::parsing::shift_structs::Shift;
 use crate::statistics::handle_stats_request;
 use actix_web::http::header::ContentType;
@@ -28,6 +28,7 @@ pub mod prelude;
 
 mod collection;
 mod deadhead;
+#[macro_use]
 mod error;
 mod index;
 mod omloop;
@@ -345,8 +346,13 @@ async fn main() -> std::io::Result<()> {
     }
     let _ = fs::write("pdf_hash", current_hash.to_le_bytes());
 
-    HttpServer::new(move || App::new().service(get_shift).service(get_omloop))
-        .bind("0.0.0.0:8080")?
-        .run()
-        .await
+    HttpServer::new(move || {
+        App::new()
+            .service(get_shift)
+            .service(get_omloop_overview)
+            .service(get_omloop)
+    })
+    .bind("0.0.0.0:8080")?
+    .run()
+    .await
 }

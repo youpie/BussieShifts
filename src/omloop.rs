@@ -29,11 +29,8 @@ impl OmloopDayIndex {
     pub fn new_omloop_timetable(timetable: &PdfTimetableCollection) -> Result<Self> {
         debug!("Indexing omlopen for timetable {}", timetable.base_start());
         let mut omlopen_map = HashMap::new();
-        for shift in &timetable.pages {
-            match Shift::load(timetable, &shift.0) {
-                Ok(shift) => BusOmloopDay::new_or_extend(&mut omlopen_map, shift),
-                Err(e) => warn!("Skipped loading {}, {}", shift.0, e.to_string()),
-            }
+        for shift in &timetable.shifts {
+            BusOmloopDay::new_or_extend(&mut omlopen_map, shift);
         }
 
         // create the valid days index map
@@ -114,6 +111,17 @@ impl OmloopDayIndex {
             index,
         )?)
     }
+
+    pub fn get_all_omloop(day: Weekday, timetable: &PdfTimetableCollection) -> Result<String> {
+        let date_index = Self::load(timetable)?;
+        let omlopen = date_index
+            .day_indexes
+            .iter()
+            .filter(|v| v.1.contains_key(&(day as u8)))
+            .map(|v| *v.0)
+            .collect::<Vec<usize>>();
+        Ok(serde_json::to_string_pretty(&omlopen)?)
+    }
 }
 
 /// Added the shift number to the omloop
@@ -126,6 +134,8 @@ struct ShiftJobExtended {
     end_location: Option<String>,
     rit: Option<usize>,
     shift: String,
+    #[serde(skip)]
+    next_day: bool,
 }
 
 impl ShiftJobExtended {
@@ -138,6 +148,7 @@ impl ShiftJobExtended {
             end_location: job.end_location,
             rit: job.rit,
             shift: shift.shift_nr.to_owned(),
+            next_day: job.next_day,
         }
     }
 }
@@ -152,7 +163,7 @@ pub struct BusOmloopDay {
 impl BusOmloopDay {
     pub(self) fn new_or_extend(
         omlopen: &mut HashMap<(Omloop, Vec<ShiftValidDay>), Self>,
-        shift: Shift,
+        shift: &Shift,
     ) {
         for job in &shift.job {
             // If the omloop of the job is found in the OmloopDay hashmap. We add that job to that OmloopDay
@@ -194,7 +205,13 @@ impl BusOmloopDay {
     }
 
     pub(self) fn sort_jobs(&mut self) {
-        self.jobs.sort_by_key(|k| k.start);
+        let jobs = std::mem::take(&mut self.jobs); // Never used this before. But AI recommended it
+        let (mut next_day, mut same_day): (Vec<_>, Vec<_>) =
+            jobs.into_iter().partition(|v| v.next_day);
+        same_day.sort_by_key(|v| v.start);
+        next_day.sort_by_key(|v| v.start);
+        same_day.append(&mut next_day);
+        self.jobs = same_day;
     }
 
     pub(self) fn get_path(omloop: Omloop, start_date: Date, index: u8) -> PathBuf {
@@ -218,7 +235,36 @@ pub async fn get_omloop(
     request: web::Path<usize>,
     query: web::Query<ShiftQuery>,
 ) -> impl Responder {
-    let date = query
+    let (day_of_the_week, timetable) = match get_dow_and_timetable(query) {
+        Ok(v) => v,
+        Err(v) => return v,
+    };
+
+    match OmloopDayIndex::get_omloop(request.into_inner(), day_of_the_week, &timetable) {
+        Ok(v) => HttpResponse::Ok().content_type(ContentType::json()).body(v),
+        Err(e) => return_error(e),
+    }
+}
+
+#[get("/omloop/index")]
+pub async fn get_omloop_overview(query: web::Query<ShiftQuery>) -> HttpResponse {
+    let (day_of_the_week, timetable) = match get_dow_and_timetable(query) {
+        Ok(v) => v,
+        Err(v) => return v,
+    };
+
+    match OmloopDayIndex::get_all_omloop(day_of_the_week, &timetable) {
+        Ok(omlopen) => HttpResponse::Ok()
+            .content_type(ContentType::json())
+            .body(omlopen),
+        Err(e) => return_error(e),
+    }
+}
+
+fn get_dow_and_timetable(
+    date_query: web::Query<ShiftQuery>,
+) -> Result<(Weekday, PdfTimetableCollection), HttpResponse> {
+    let date = date_query
         .date
         .as_ref()
         .and_then(|date_string| Date::parse(date_string, DATE_FORMAT).ok())
@@ -228,11 +274,8 @@ pub async fn get_omloop(
 
     let timetable = match get_valid_timetables(Some(date), false) {
         Ok(timetable) if let Some(first_timetable) = timetable.0.last().cloned() => first_timetable,
-        _ => return return_error(eyre!("Could not get timetable")),
+        _ => return Err(return_error(eyre!("Could not get timetable"))),
     };
 
-    match OmloopDayIndex::get_omloop(request.into_inner(), day_of_the_week, &timetable) {
-        Ok(v) => HttpResponse::Ok().content_type(ContentType::json()).body(v),
-        Err(e) => return_error(e),
-    }
+    Ok((day_of_the_week, timetable))
 }

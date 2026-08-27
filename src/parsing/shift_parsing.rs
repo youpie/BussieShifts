@@ -131,12 +131,12 @@ fn get_line_element(
         .1
         .1;
     let mut lijn: Option<String> = None;
-    let mut omloop: Option<_> = None;
-    let mut rit: Option<_> = None;
-    let mut start: Option<_> = None;
-    let mut van: Option<_> = None;
-    let mut naar: Option<_> = None;
-    let mut eind: Option<_> = None;
+    let mut omloop: Option<String> = None;
+    let mut rit: Option<String> = None;
+    let mut start: Option<String> = None;
+    let mut van: Option<String> = None;
+    let mut naar: Option<String> = None;
+    let mut eind: Option<String> = None;
     let mut start_date = Date::from_calendar_date(2025, time::Month::June, 29)?;
     let mut valid_on = ShiftValid::Unknown;
     let mut valid_days = Vec::new();
@@ -361,8 +361,9 @@ fn job_creator(
     let mut omloop_number = None;
     let mut job_type = JobType::Unknown;
     let mut rit_number = None;
-    let mut start_time: Option<Time> = None;
+    let mut start_time = None;
     let mut end_time = None;
+    let mut next_day = false;
     if let Some(lijn_string) = lijn {
         if lijn_string == "MAT" {
             job_type = JobType::Rijden {
@@ -388,10 +389,10 @@ fn job_creator(
         rit_number = rit_string.parse::<usize>().ok();
     }
     if let Some(start_string) = start {
-        start_time = to_iso8601(start_string, "Start time")?;
+        (start_time, next_day) = to_iso8601(start_string, "Start time")?;
     }
     if let Some(end_string) = eind {
-        end_time = to_iso8601(end_string, "End time")?;
+        (end_time, _) = to_iso8601(end_string, "End time")?;
     }
     if let Some(omloop_string) = omloop {
         match omloop_string.as_ref() {
@@ -413,10 +414,14 @@ fn job_creator(
         omloop: omloop_number,
         assumed_omloop: None,
         rit: rit_number,
+        next_day,
     })
 }
 
-fn to_iso8601(time_string: String, job_name: &str) -> Result<Option<Time>, ShiftParseError> {
+fn to_iso8601(
+    time_string: String,
+    job_name: &str,
+) -> Result<(Option<Time>, bool), ShiftParseError> {
     let mut time_split = time_string.split(":").into_iter();
     let hour_noniso = time_split
         .next()
@@ -444,11 +449,11 @@ fn to_iso8601(time_string: String, job_name: &str) -> Result<Option<Time>, Shift
             error: err.to_string(),
             line: Some(time_string.clone()),
         })?;
-    let hour_iso = match hour_noniso {
-        24.. => hour_noniso - 24,
-        _ => hour_noniso,
+    let (hour_iso, next_day) = match hour_noniso {
+        24.. => (hour_noniso - 24, true),
+        _ => (hour_noniso, false),
     };
-    Ok(Time::from_hms(hour_iso, minute, 0).ok())
+    Ok((Time::from_hms(hour_iso, minute, 0).ok(), next_day))
 }
 
 fn message_type_finder(lijn_string: String) -> Option<JobMessageType> {

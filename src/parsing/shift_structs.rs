@@ -118,6 +118,8 @@ pub struct ShiftJob {
     pub omloop: Option<usize>,
     pub assumed_omloop: Option<usize>,
     pub rit: Option<usize>,
+    #[serde(skip)]
+    pub next_day: bool,
 }
 
 impl ShiftJob {
@@ -147,14 +149,14 @@ pub struct Shift {
 }
 
 impl Shift {
-    pub fn load(timetable: &PdfTimetableCollection, id: &str) -> Result<Self> {
+    pub fn _load(timetable: &PdfTimetableCollection, id: &str) -> Result<Self> {
         Ok(serde_json::from_str::<Self>(&Self::load_json(
             timetable, id,
         )?)?)
     }
 
     pub fn load_json(timetable: &PdfTimetableCollection, id: &str) -> Result<String> {
-        let base_path = timetable.start_date.format(DATE_FORMAT)?;
+        let base_path = timetable.base_start().format(DATE_FORMAT)?;
         let path = PathBuf::from(format!(
             "{COLLECTION_PATH}/{base_path}/{SHIFT_PATH}/{id}.json"
         )); // Because we don't have the shift itself yet, we need to recreate the path and get the date from the timetable collection
