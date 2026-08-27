@@ -1,14 +1,15 @@
-use std::path::PathBuf;
-
 use actix_web::{HttpResponse, http::header::ContentType};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use time::Date;
 use walkdir::WalkDir;
 
 use crate::{
-    DATE_FORMAT, GenResult, collection::PdfTimetableCollection, get_valid_timetables,
-    index::get_valid_shifts, parsing::shift_structs::Shift, return_error,
+    collection::PdfTimetableCollection, get_valid_timetables, index::get_valid_shifts,
+    parsing::shift_structs::Shift, return_error,
 };
+
+use crate::prelude::*;
 
 #[derive(Serialize, Deserialize)]
 pub struct Statistics {
@@ -25,9 +26,9 @@ pub struct Statistics {
 }
 
 impl Statistics {
-    fn create_statistics(date: Option<Date>) -> GenResult<Self> {
+    fn create_statistics(date: Option<Date>) -> Result<Self> {
         let active_timetables = get_valid_timetables(date, false)?;
-        let timetables = PdfTimetableCollection::get_timetables()?;
+        let timetables = PdfTimetableCollection::get_global()?;
         let active_shifts = active_timetables
             .0
             .iter()
@@ -41,7 +42,7 @@ impl Statistics {
         let recent_timetable = active_timetables
             .0
             .last()
-            .and_then(|timetable| timetable.valid_from.format(DATE_FORMAT).ok());
+            .and_then(|timetable| timetable.start_date.format(DATE_FORMAT).ok());
         let next_timetable = active_timetables
             .1
             .and_then(|valid_date| valid_date.format(DATE_FORMAT).ok());
@@ -61,7 +62,7 @@ impl Statistics {
         })
     }
 
-    fn get_errored_shifts() -> GenResult<Vec<String>> {
+    fn get_errored_shifts() -> Result<Vec<String>> {
         let mut files: Vec<PathBuf> = vec![];
         for entry in WalkDir::new("Dienstboek")
             .into_iter()
@@ -74,13 +75,13 @@ impl Statistics {
         }
         let mut shift = vec![];
         for file in files {
-            match || -> GenResult<String> {
+            match || -> Result<String> {
                 let shift_parse = std::fs::read_to_string(&file)?;
                 let shift: Shift = serde_json::from_str(&shift_parse)?;
                 if shift.parse_error.is_some() {
                     Ok(file.to_string_lossy().to_string())
                 } else {
-                    Err("no error".into())
+                    Err(eyre!("no error"))
                 }
             }() {
                 Ok(path) => shift.push(path),
@@ -99,6 +100,6 @@ pub fn handle_stats_request(date: Option<Date>) -> HttpResponse {
                 .content_type(ContentType::json())
                 .body(json)
         }
-        Err(err) => return_error(err.to_string()),
+        Err(err) => return_error(err),
     }
 }

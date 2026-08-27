@@ -1,40 +1,19 @@
-#![allow(warnings)]
-
-use crate::GenResult;
 use crate::collection::ShiftData;
 use crate::parsing::shift_structs::*;
 use float_ord::FloatOrd;
 use lopdf::Document;
 use regex::Regex;
-use serde::Serialize;
 use std::collections::HashMap;
 use std::ops::Neg;
 use std::path::PathBuf;
-use time::format_description::BorrowedFormatItem;
-use time::macros::format_description;
-use time::{Date, Time, error};
+use time::{Date, Time};
 
-const DATE_FORMAT: &[BorrowedFormatItem<'_>] = format_description!["[day]-[month]-[year]"];
+use super::*;
 
-trait StrTime {
-    fn string_to_time(&self) -> Result<Time, error::Parse>;
-}
-
-impl StrTime for String {
-    fn string_to_time(&self) -> Result<Time, error::Parse> {
-        let format = format_description!("[hour]:[minute]");
-        Ok(Time::parse(self, format)?)
-    }
-}
-
-pub fn parse_pdf(
-    pdf_path: &PathBuf,
-    shift_data: HashMap<String, ShiftData>,
-) -> GenResult<Vec<Shift>> {
+pub fn parse_pdf(pdf_path: &PathBuf, shift_data: HashMap<String, ShiftData>) -> Result<Vec<Shift>> {
     let doc = Document::load(pdf_path)?;
     let pages = doc.get_pages();
     let pagenr_hashmap = reverse_pagenr_hashmap(shift_data);
-    let mut i = 0;
     let mut shifts: Vec<Shift> = vec![];
     for (&page_number, &page_id) in pages.iter() {
         let page_dict = doc.get_object(page_id)?.as_dict()?;
@@ -66,7 +45,6 @@ pub fn parse_pdf(
                 println!("Unexpected type for Contents on page {}", page_number);
             }
         }
-        i += 1;
     }
     Ok(shifts)
 }
@@ -81,7 +59,7 @@ fn reverse_pagenr_hashmap(hashmap: HashMap<String, ShiftData>) -> HashMap<u32, S
     new_hashmap
 }
 
-fn parse_page(page_stream: String, page_number: u32, shift_number: String) -> GenResult<Shift> {
+fn parse_page(page_stream: String, page_number: u32, shift_number: String) -> Result<Shift> {
     let re = Regex::new(r"\((.*?)\)")?; // Match text inside parentheses
     let mut line_elements: Vec<(String, (f32, f32))> = vec![];
     let page_stream_clone = page_stream.clone();
@@ -140,7 +118,7 @@ fn get_line_element(
     offset: f32,
     page_number: u32,
     shift_number: String,
-) -> GenResult<Shift> {
+) -> Result<Shift> {
     let mut line_errors: Vec<ShiftParseError> = vec![];
 
     let mut last_y = items
@@ -153,17 +131,19 @@ fn get_line_element(
         .1
         .1;
     let mut lijn: Option<String> = None;
-    let mut omloop: Option<_> = None;
-    let mut rit: Option<_> = None;
-    let mut start: Option<_> = None;
-    let mut van: Option<_> = None;
-    let mut naar: Option<_> = None;
-    let mut eind: Option<_> = None;
+    let mut omloop: Option<String> = None;
+    let mut rit: Option<String> = None;
+    let mut start: Option<String> = None;
+    let mut van: Option<String> = None;
+    let mut naar: Option<String> = None;
+    let mut eind: Option<String> = None;
     let mut start_date = Date::from_calendar_date(2025, time::Month::June, 29)?;
     let mut valid_on = ShiftValid::Unknown;
+    let mut valid_days = Vec::new();
     let mut shift_number = shift_number;
     let mut location = String::new();
     let mut jobs = vec![];
+    let mut last_job = ShiftJob::default();
     for item in items {
         match get_line_information(
             &mut lijn,
@@ -174,8 +154,10 @@ fn get_line_element(
             &mut naar,
             &mut eind,
             &mut jobs,
+            &mut last_job,
             &mut start_date,
             &mut valid_on,
+            &mut valid_days,
             &mut shift_number,
             &mut location,
             last_y,
@@ -193,6 +175,7 @@ fn get_line_element(
     Ok(Shift {
         shift_nr: shift_number,
         valid_on,
+        valid_days,
         location,
         shift_type: None,
         job: jobs,
@@ -214,8 +197,10 @@ fn get_line_information(
     naar: &mut Option<String>,
     eind: &mut Option<String>,
     jobs: &mut Vec<ShiftJob>,
+    last_job: &mut ShiftJob,
     start_date: &mut Date,
     valid_on: &mut ShiftValid,
+    valid_days: &mut Vec<ShiftValidDay>,
     shift_number: &mut String,
     location: &mut String,
     last_y: f32,
@@ -240,7 +225,7 @@ fn get_line_information(
     let eind_lower = 490.0 - 83.0 - offset;
     if last_y != current_y {
         //println!("Job gevonden!\nLijn {lijn:?}, omloop {omloop:?}, rit {rit:?}, van {van:?}, naar {naar:?}, begint om {start:?} en stopt om {eind:?}");
-        let job = job_creator(
+        let mut job = job_creator(
             lijn_number.clone(),
             omloop.clone(),
             rit.clone(),
@@ -249,6 +234,13 @@ fn get_line_information(
             van.clone(),
             naar.clone(),
         )?;
+
+        // Logic to add Omloopnummer to driving job without omloopnummer if last job was also a driving job
+        if job.job_type.is_vehicle_involved() && job.omloop.is_none() {
+            job.assumed_omloop = last_job.omloop.or(last_job.assumed_omloop);
+        }
+        *last_job = job.clone();
+
         //println!("{:?}", &job);
         if !job.empty() {
             jobs.push(job);
@@ -263,21 +255,21 @@ fn get_line_information(
     }
     //println!("Line: {}, x: {}",line, current_x);
     if current_y < 50.0 || current_y > 735.0 {
-        if let metadata = line.clone() {
-            identify_metadata(
-                &mut *start_date,
-                &mut *valid_on,
-                &mut *shift_number,
-                &mut *location,
-                metadata,
-                current_y,
-                current_x,
-            )
-            .ok_or(ShiftParseError::MetadataFailure {
-                page_number,
-                line: None,
-            })?;
-        }
+        let metadata = line.clone();
+        identify_metadata(
+            &mut *start_date,
+            &mut *valid_on,
+            &mut *valid_days,
+            &mut *shift_number,
+            &mut *location,
+            metadata,
+            current_y,
+            current_x,
+        )
+        .ok_or(ShiftParseError::MetadataFailure {
+            page_number,
+            line: None,
+        })?;
     } else if current_x >= lijn_lower && current_x <= lijn_upper {
         *lijn_number = Some(line);
     } else if current_x >= omloop_lower && current_x <= omloop_upper {
@@ -300,32 +292,60 @@ fn get_line_information(
 fn identify_metadata(
     start_date: &mut Date,
     valid_on: &mut ShiftValid,
+    valid_days: &mut Vec<ShiftValidDay>,
     shift_number: &mut String,
     location: &mut String,
     metadata: String,
     current_y: f32,
     current_x: f32,
 ) -> Option<()> {
+    let metadata_clone = metadata.clone();
     if metadata.contains("Ingangsdatum ") {
         *start_date = Date::parse(metadata.split("Ingangsdatum ").last()?, DATE_FORMAT).ok()?;
     } else if metadata.contains("Dienst ") {
         let shift_number_temp = metadata.split("Dienst ").last()?.to_owned();
         *shift_number = shift_number_temp.replace(" ", "");
-    } else if metadata.contains("MA/DI/WO/DO/VR") {
-        *valid_on = ShiftValid::Weekdays;
-    } else if metadata.contains("MA/DI/DO/VR") {
-        *valid_on = ShiftValid::WeekdaysExceptWednesday;
-    } else if metadata.contains("WO") {
-        *valid_on = ShiftValid::Wednesday;
-    } else if metadata.contains("ZA") {
-        *valid_on = ShiftValid::Saturday;
-    } else if metadata.contains("ZO") {
-        *valid_on = ShiftValid::Sunday;
     } else if current_y > 760.0 && current_x > 300.0 {
         // warn!("locatie gevonden: {metadata}\ny: {current_y}");
         *location = metadata
     }
 
+    if metadata_clone.contains("MA") {
+        valid_days.push(ShiftValidDay::Monday);
+    }
+    if metadata_clone.contains("DI") {
+        valid_days.push(ShiftValidDay::Tuesday);
+    }
+    if metadata_clone.contains("WO") {
+        valid_days.push(ShiftValidDay::Wednsesday);
+    }
+    if metadata_clone.contains("DO") {
+        valid_days.push(ShiftValidDay::Thursday);
+    }
+    if metadata_clone.contains("VR") {
+        valid_days.push(ShiftValidDay::Friday);
+    }
+    if metadata_clone.contains("ZA") {
+        valid_days.push(ShiftValidDay::Saturday);
+        *valid_on = ShiftValid::Saturday;
+    }
+    if metadata_clone.contains("ZO") {
+        valid_days.push(ShiftValidDay::Sunday);
+        *valid_on = ShiftValid::Sunday;
+    }
+
+    //Backwards compatibility
+    if metadata_clone.contains("MA/DI/WO/DO/VR") {
+        *valid_on = ShiftValid::Weekdays;
+    } else if metadata_clone.contains("MA/DI/DO/VR") {
+        *valid_on = ShiftValid::WeekdaysExceptWednesday;
+    } else if metadata_clone.contains("WO") {
+        *valid_on = ShiftValid::Wednesday;
+    } else if metadata_clone.contains("ZA") {
+        *valid_on = ShiftValid::Saturday;
+    } else if metadata_clone.contains("ZO") {
+        *valid_on = ShiftValid::Sunday;
+    }
     Some(())
 }
 
@@ -341,8 +361,9 @@ fn job_creator(
     let mut omloop_number = None;
     let mut job_type = JobType::Unknown;
     let mut rit_number = None;
-    let mut start_time: Option<Time> = None;
+    let mut start_time = None;
     let mut end_time = None;
+    let mut next_day = false;
     if let Some(lijn_string) = lijn {
         if lijn_string == "MAT" {
             job_type = JobType::Rijden {
@@ -368,10 +389,10 @@ fn job_creator(
         rit_number = rit_string.parse::<usize>().ok();
     }
     if let Some(start_string) = start {
-        start_time = to_iso8601(start_string, "Start time")?;
+        (start_time, next_day) = to_iso8601(start_string, "Start time")?;
     }
     if let Some(end_string) = eind {
-        end_time = to_iso8601(end_string, "End time")?;
+        (end_time, _) = to_iso8601(end_string, "End time")?;
     }
     if let Some(omloop_string) = omloop {
         match omloop_string.as_ref() {
@@ -391,11 +412,16 @@ fn job_creator(
         start_location: van,
         end_location: naar,
         omloop: omloop_number,
+        assumed_omloop: None,
         rit: rit_number,
+        next_day,
     })
 }
 
-fn to_iso8601(time_string: String, job_name: &str) -> Result<Option<Time>, ShiftParseError> {
+fn to_iso8601(
+    time_string: String,
+    job_name: &str,
+) -> Result<(Option<Time>, bool), ShiftParseError> {
     let mut time_split = time_string.split(":").into_iter();
     let hour_noniso = time_split
         .next()
@@ -423,11 +449,11 @@ fn to_iso8601(time_string: String, job_name: &str) -> Result<Option<Time>, Shift
             error: err.to_string(),
             line: Some(time_string.clone()),
         })?;
-    let hour_iso = match hour_noniso {
-        24.. => hour_noniso - 24,
-        _ => hour_noniso,
+    let (hour_iso, next_day) = match hour_noniso {
+        24.. => (hour_noniso - 24, true),
+        _ => (hour_noniso, false),
     };
-    Ok(Time::from_hms(hour_iso, minute, 0).ok())
+    Ok((Time::from_hms(hour_iso, minute, 0).ok(), next_day))
 }
 
 fn message_type_finder(lijn_string: String) -> Option<JobMessageType> {

@@ -1,0 +1,23 @@
+# ZOB
+> Eindhoven Garage
+ehv gar
+ehv gas
+ehvsnel
+ehv traag
+pod gar
+
+> Eindhoven Station
+buffer1
+buffer2
+buffer3
+ehv bst
+pod bst
+
+> Reusel Garage
+reu gar
+
+> Helmond Station
+hmd.bst
+
+> Helmond Garage
+hlmdgar
