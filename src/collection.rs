@@ -35,10 +35,9 @@ pub struct PdfTimetableCollection {
     valid_from: Vec<Date>,
     pub files: HashMap<usize, String>,
     pub pages: HashMap<String, ShiftData>,
-    pub changed_pages: Option<HashMap<String, ShiftData>>,
     #[serde(skip)]
     /// Will be skipped during deserialization
-    pub shifts: Vec<Shift>,
+    pub shifts: HashMap<String, Shift>,
 }
 
 impl PdfTimetableCollection {
@@ -56,6 +55,12 @@ impl PdfTimetableCollection {
             .first()
             .result_reason("No shifts found")?
             .starting_date;
+
+        let mut parsed_shift_map = HashMap::new();
+        for shift in parsed_shifts {
+            parsed_shift_map.insert(shift.shift_nr.clone(), shift);
+        }
+
         if let Some(existing_collection) = existing_timetables
             .iter_mut()
             .find(|item| item.start_date == start_date)
@@ -65,7 +70,8 @@ impl PdfTimetableCollection {
                 .files
                 .insert(file_id, pdf_path.to_string_lossy().to_string());
             existing_collection.pages.extend(shift_data_map);
-            existing_collection.shifts.extend(parsed_shifts);
+
+            existing_collection.shifts.extend(parsed_shift_map);
             Ok(None)
         } else {
             info!("Writing new collection {:?}", &start_date);
@@ -73,9 +79,8 @@ impl PdfTimetableCollection {
                 valid_from: vec![start_date.clone()],
                 start_date,
                 files: HashMap::from([(file_id, pdf_path.to_string_lossy().to_string())]),
-                changed_pages: None,
                 pages: shift_data_map,
-                shifts: parsed_shifts,
+                shifts: parsed_shift_map,
             }))
         }
     }
@@ -134,11 +139,11 @@ impl PdfTimetableCollection {
                     changes_ttb.timetable.base_start()
                 );
                 timetable.files.extend(changes_ttb.timetable.files.clone());
-                if let Some(ref mut changed_pages) = timetable.changed_pages {
-                    changed_pages.extend(changes_ttb.timetable.pages.clone());
-                } else {
-                    timetable.changed_pages = Some(changes_ttb.timetable.pages.clone())
-                };
+                timetable.pages.extend(changes_ttb.timetable.pages.clone());
+
+                for shift in &changes_ttb.timetable.shifts {
+                    timetable.shifts.insert(shift.0.to_owned(), shift.1.clone());
+                }
             }
         }
 
@@ -176,7 +181,14 @@ impl PdfTimetableCollection {
 
     pub fn save(collections: &Vec<Self>) -> Result<()> {
         for collection in collections {
-            Shift::save_extracted_shifts(collection.shifts.clone())?;
+            Shift::save_extracted_shifts(
+                collection
+                    .shifts
+                    .clone()
+                    .into_iter()
+                    .map(|(_id, score)| score)
+                    .collect(),
+            )?;
             let mut output_path = collection.collection_path();
             output_path.set_extension("json");
             fs::write(

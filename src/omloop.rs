@@ -37,7 +37,7 @@ impl OmloopDayIndex {
         debug!("Indexing omlopen for timetable {}", timetable.base_start());
         let mut omlopen_map = HashMap::new();
         for shift in &timetable.shifts {
-            BusOmloopDay::new_or_extend(&mut omlopen_map, shift);
+            BusOmloopDay::new_or_extend(&mut omlopen_map, shift.1);
         }
 
         // create the valid days index map
@@ -105,9 +105,9 @@ impl OmloopDayIndex {
     pub fn get_omloop(
         omloop: usize,
         day_of_week: Weekday,
-        mut timetables: Vec<PdfTimetableCollection>,
+        timetable: PdfTimetableCollection,
     ) -> Result<String> {
-        let index_map = Self::find_omloop(omloop, day_of_week, &mut timetables)?;
+        let index_map = Self::load(&timetable)?;
         let index = *index_map
             .day_indexes
             .get(&omloop)
@@ -129,26 +129,6 @@ impl OmloopDayIndex {
             .map(|v| *v.0)
             .collect::<Vec<usize>>();
         Ok(serde_json::to_string_pretty(&omlopen)?)
-    }
-
-    fn find_omloop(
-        omloop: Omloop,
-        day_of_week: Weekday,
-        valid_timetables: &mut Vec<PdfTimetableCollection>,
-    ) -> Result<OmloopDayIndex> {
-        let current_timetable = match valid_timetables.pop() {
-            Some(timetable) => timetable,
-            None => return Err(eyre!("Could not find any timetable with that omloop")), // If there are no more valid timetables while this check runs, the shift is not available
-        };
-        let current_omloop_index = Self::load(&current_timetable)?;
-        match current_omloop_index
-            .day_indexes
-            .iter()
-            .find(|v| *v.0 == omloop && v.1.contains_key(&(day_of_week as u8)))
-        {
-            Some(_) => Ok(current_omloop_index),
-            None => Self::find_omloop(omloop, day_of_week, valid_timetables),
-        }
     }
 }
 
@@ -281,11 +261,6 @@ pub async fn get_omloop_overview(query: web::Query<ShiftQuery>) -> HttpResponse 
         Err(v) => return v,
     };
 
-    let timetable = match timetable.first() {
-        Some(v) => v,
-        None => return return_error(eyre!("Could not find any timetables")),
-    };
-
     match OmloopDayIndex::get_all_omloop(day_of_the_week, &timetable) {
         Ok(omlopen) => HttpResponse::Ok()
             .content_type(ContentType::json())
@@ -296,7 +271,7 @@ pub async fn get_omloop_overview(query: web::Query<ShiftQuery>) -> HttpResponse 
 
 fn get_dow_and_timetable(
     date_query: web::Query<ShiftQuery>,
-) -> Result<(Weekday, Vec<PdfTimetableCollection>), HttpResponse> {
+) -> Result<(Weekday, PdfTimetableCollection), HttpResponse> {
     let date = date_query
         .date
         .as_ref()
@@ -310,7 +285,7 @@ fn get_dow_and_timetable(
     let day_of_the_week = date.weekday();
 
     let timetable = match get_valid_timetables(Some(date), false) {
-        Ok(v) => v.0,
+        Ok(v) if let Some(first_timetable) = v.0.last().cloned() => first_timetable,
         _ => return Err(return_error(eyre!("Could not get timetable"))),
     };
 
