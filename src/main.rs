@@ -143,13 +143,29 @@ fn load_pdfs_and_index() -> Result<()> {
     Ok(())
 }
 
+#[derive(PartialEq)]
+pub enum TTBOptions {
+    None,
+    AppendFuture,
+    OnlyFirst,
+}
+
+impl TTBOptions {
+    pub fn from_bool(true_is_only_first: bool, value_if_false: Self) -> Self {
+        match true_is_only_first {
+            true => TTBOptions::OnlyFirst,
+            false => value_if_false,
+        }
+    }
+}
+
 // load all pdf_collection files. And determine which one is current
 // Also if it exists, save the date of when it gets invalidated (when the Next timetable starts)
 // In reverse chronological order
 // Upcoming timetables are placed in the beginning of the list, also in reverse order
 fn get_valid_timetables(
     date: Option<Date>,
-    append_future_timetables: bool,
+    options: TTBOptions,
 ) -> Result<(ValidTimetables, NextTimetableChangeDate)> {
     let collections = PdfTimetableCollection::get_global()?;
     let current_date = match date {
@@ -174,7 +190,7 @@ fn get_valid_timetables(
         .last()
         .and_then(|x| Some(x.start_date.clone()));
     // The future timetables should be the first in the list
-    let active_timetables = if append_future_timetables {
+    let active_timetables = if options == TTBOptions::AppendFuture {
         // first pop the last timetable (the most recent timetable)
         let recent_timetable = current_timetables.pop();
         let mut new_timetables = current_timetables;
@@ -185,6 +201,8 @@ fn get_valid_timetables(
             new_timetables.push(recent_timetable);
         }
         new_timetables
+    } else if options == TTBOptions::OnlyFirst {
+        vec![current_timetables.pop().result_reason("No timetables")?]
     } else {
         current_timetables
     };
@@ -201,6 +219,16 @@ fn find_shift(
         Some(timetable) => timetable,
         None => return None, // If there are no more valid timetables while this check runs, the shift is not available
     };
+
+    // // The current logic is (probably) sound enough to only return the first valid timetable. So the recursion is no longer needed
+    // if return_first {
+    //     return current_timetable
+    //         .pages
+    //         .get(shift_number)
+    //         .cloned()
+    //         .map(|val| (current_timetable, val));
+    // }
+
     match current_timetable.clone().pages.get(shift_number) {
         Some(shift) => Some((current_timetable, shift.clone())),
         None => find_shift(shift_number, valid_timetables),
@@ -235,7 +263,8 @@ async fn get_shift(request: web::Path<String>, query: web::Query<ShiftQuery>) ->
         return handle_stats_request(custom_date_option);
     }
 
-    let add_upcoming_timetables = custom_date_option.is_none();
+    let add_upcoming_timetables =
+        TTBOptions::from_bool(custom_date_option.is_some(), TTBOptions::AppendFuture);
     let mut valid_timetables =
         match get_valid_timetables(custom_date_option, add_upcoming_timetables) {
             Ok(result) => result.0,

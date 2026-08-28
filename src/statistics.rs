@@ -9,7 +9,7 @@ use crate::{
     parsing::shift_structs::Shift, return_error,
 };
 
-use crate::prelude::*;
+use crate::{TTBOptions, prelude::*};
 
 #[derive(Serialize, Deserialize)]
 pub struct Statistics {
@@ -27,7 +27,12 @@ pub struct Statistics {
 
 impl Statistics {
     fn create_statistics(date: Option<Date>) -> Result<Self> {
-        let active_timetables = get_valid_timetables(date, false)?;
+        let active_timetables = get_valid_timetables(date, TTBOptions::None)?;
+        debug!("Set date {date:?}");
+        for ttb in &active_timetables.0 {
+            debug!("{}", ttb.start_date);
+        }
+
         let timetables = PdfTimetableCollection::get_global()?;
         let active_shifts = active_timetables
             .0

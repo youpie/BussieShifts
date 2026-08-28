@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use time::{Date, OffsetDateTime, Time, Weekday};
 
 use crate::{
-    ShiftQuery,
+    ShiftQuery, TTBOptions,
     collection::PdfTimetableCollection,
     get_valid_timetables,
     parsing::shift_structs::{JobType, Shift, ShiftJob, ShiftValidDay},
@@ -284,7 +284,7 @@ fn get_dow_and_timetable(
 
     let day_of_the_week = date.weekday();
 
-    let timetable = match get_valid_timetables(Some(date), false) {
+    let timetable = match get_valid_timetables(Some(date), TTBOptions::OnlyFirst) {
         Ok(v) if let Some(first_timetable) = v.0.last().cloned() => first_timetable,
         _ => return Err(return_error(eyre!("Could not get timetable"))),
     };

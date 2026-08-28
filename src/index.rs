@@ -4,6 +4,7 @@ use actix_web::{HttpResponse, http::header::ContentType};
 use serde::Serialize;
 use time::Date;
 
+use crate::TTBOptions;
 use crate::get_valid_timetables;
 
 use crate::prelude::*;
@@ -16,7 +17,8 @@ pub struct IndexShift {
 
 pub fn get_valid_shifts(date: Option<Date>) -> Result<Vec<IndexShift>> {
     let mut available_shifts: HashMap<String, (Date, String)> = HashMap::new();
-    let valid_timetables = get_valid_timetables(date, false)?.0;
+    let only_first = TTBOptions::from_bool(date.is_some(), TTBOptions::None);
+    let valid_timetables = get_valid_timetables(date, only_first)?.0;
     for current_timetable in valid_timetables {
         for shift in current_timetable.pages {
             available_shifts.insert(
