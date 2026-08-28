@@ -30,6 +30,7 @@ pub struct PdfTimetableCollection {
     valid_from: Vec<Date>,
     pub files: HashMap<usize, String>,
     pub pages: HashMap<String, ShiftData>,
+    pub changed_pages: Option<HashMap<String, ShiftData>>,
     #[serde(skip)]
     /// Will be skipped during deserialization
     pub shifts: Vec<Shift>,
@@ -45,11 +46,11 @@ impl PdfTimetableCollection {
         // Load the PDF document.
         let shift_data_map = ShiftData::load(&pdf_path, file_id)?;
         let parsed_shifts = parse_pdf(&pdf_path, shift_data_map.clone())?;
+
         let start_date = parsed_shifts
             .first()
             .result_reason("No shifts found")?
             .starting_date;
-        // let valid_from_dates;
         if let Some(existing_collection) = existing_timetables
             .iter_mut()
             .find(|item| item.start_date == start_date)
@@ -73,13 +74,37 @@ impl PdfTimetableCollection {
         }
     }
 
+    pub fn combine_from_changes_files(timetables: Vec<Self>, changes_files: Vec<Vec<Date>>) {
+        let (timetables_that_should_be_changed, timetables_that_probably_shouldnt_be_changed): (
+            Vec<_>,
+            Vec<_>,
+        ) = timetables.into_iter().partition(|v| {
+            changes_files
+                .iter()
+                .any(|cf| cf.first() == Some(&v.base_start()))
+        });
+
+        let (timetables_to_append, timetables_that_shouldnt_be_changed): (Vec<_>, Vec<_>) =
+            timetables_that_probably_shouldnt_be_changed
+                .into_iter()
+                .partition(|t| changes_files.iter().any(|cf| cf.contains(&t.base_start())));
+
+        for timetable in timetables_that_should_be_changed {
+            if let Some(updated_timetables) = timetables_to_append
+                .iter()
+                .find(|append_timetable| append_timetable.base_start() == timetable.base_start())
+            {
+            }
+        }
+    }
+
     pub fn add_valid_from_data(
         current_timetable_collections: Vec<Self>,
         valid_from_paths: Vec<PathBuf>,
     ) -> Vec<Self> {
         let mut valid_froms = Vec::new();
         for valid_from_path in valid_from_paths {
-            valid_froms.push(valid_on::get_timetable_valid_on(valid_from_path));
+            valid_froms.push(valid_on::parse_dates_from_file(&valid_from_path));
         }
 
         let mut new_timetable_collections = Vec::new();

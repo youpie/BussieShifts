@@ -1,6 +1,7 @@
 use crate::collection::{PdfTimetableCollection, ShiftData};
 use crate::omloop::{OmloopDayIndex, get_omloop, get_omloop_overview};
 use crate::parsing::shift_structs::Shift;
+use crate::parsing::valid_on;
 use crate::statistics::handle_stats_request;
 use actix_web::http::header::ContentType;
 use actix_web::{App, HttpResponse, HttpServer, Responder, get, web};
@@ -57,12 +58,14 @@ struct ShiftQuery {
 struct TimetablePaths {
     pub timetable_pdfs: Vec<PathBuf>,
     pub valid_from_files: Vec<PathBuf>,
+    pub changes_files: Vec<PathBuf>,
 }
 
 fn get_timetable_pdf_files() -> Result<TimetablePaths> {
     let mut timetable_pdfs = Vec::new();
     let mut updated_timetable_pdfs = Vec::new();
-    let mut valid_on_files = Vec::new();
+    let mut valid_from_files = Vec::new();
+    let mut changes_files = Vec::new();
     for entry in WalkDir::new(BOOKS_PATH).into_iter().filter_map(Result::ok) {
         let path = entry.path();
         if path
@@ -75,7 +78,9 @@ fn get_timetable_pdf_files() -> Result<TimetablePaths> {
                 updated_timetable_pdfs.push(path.to_path_buf());
             }
         } else if path.file_name() == Some(OsStr::new("valid_from.txt")) {
-            valid_on_files.push(path.to_path_buf());
+            valid_from_files.push(path.to_path_buf());
+        } else if path.file_name() == Some(OsStr::new("changes.txt")) {
+            changes_files.push(path.to_path_buf());
         } else if path.is_file() && path.extension() == Some(OsStr::new("pdf")) {
             // Skip directories
             timetable_pdfs.push(path.to_path_buf());
@@ -89,7 +94,8 @@ fn get_timetable_pdf_files() -> Result<TimetablePaths> {
     timetable_pdfs.extend(updated_timetable_pdfs);
     Ok(TimetablePaths {
         timetable_pdfs,
-        valid_from_files: valid_on_files,
+        valid_from_files,
+        changes_files,
     })
 }
 
@@ -105,6 +111,13 @@ fn load_pdfs_and_index() -> Result<()> {
         Err(e) => return Err(e.into()),
     };
     fs::remove_dir_all(COLLECTION_PATH)?;
+
+    let changed_files: Vec<Vec<Date>> = files
+        .changes_files
+        .iter()
+        .map(|v| valid_on::parse_dates_from_file(v))
+        .collect();
+
     let mut timetable_collections = Vec::new();
     for file_path in files.timetable_pdfs.iter().enumerate() {
         let collection = PdfTimetableCollection::new_or_extend(
