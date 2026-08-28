@@ -24,6 +24,11 @@ pub struct ShiftData {
     pub shift_prefix: String,
 }
 
+struct ChangesCollection {
+    timetable: PdfTimetableCollection,
+    base_start_date: Date,
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct PdfTimetableCollection {
     pub start_date: Date,
@@ -68,34 +73,78 @@ impl PdfTimetableCollection {
                 valid_from: vec![start_date.clone()],
                 start_date,
                 files: HashMap::from([(file_id, pdf_path.to_string_lossy().to_string())]),
+                changed_pages: None,
                 pages: shift_data_map,
                 shifts: parsed_shifts,
             }))
         }
     }
 
-    pub fn combine_from_changes_files(timetables: Vec<Self>, changes_files: Vec<Vec<Date>>) {
-        let (timetables_that_should_be_changed, timetables_that_probably_shouldnt_be_changed): (
-            Vec<_>,
-            Vec<_>,
-        ) = timetables.into_iter().partition(|v| {
-            changes_files
+    pub fn combine_from_changes_files(
+        timetables: Vec<Self>,
+        changes_files: Vec<Vec<Date>>,
+    ) -> Vec<Self> {
+        debug!(
+            "Timetables {}, changes {}",
+            timetables.len(),
+            changes_files.len()
+        );
+        // Timetables that need changing can be identified by their start date being found in a changes_file on the first line
+        // Partition finds these timetables and splits them, the rest are timetables that either don't need changing
+        // Or are changed timetables themselves
+        let (mut ttbs_with_changes_needed, changes_ttbs_and_unchanging_ttbs): (Vec<_>, Vec<_>) =
+            timetables.into_iter().partition(|v| {
+                changes_files
+                    .iter()
+                    .any(|cf| cf.first() == Some(&v.base_start()))
+            });
+        let mut changes_collection = Vec::new();
+        // changed timetables are identified by their start date being contained in a changes_file
+        // Because we already filtered out the timetables that need changes, we don't need to filter the first line
+        let (_changes_timetables, unchanging_ttb): (Vec<_>, Vec<_>) =
+            changes_ttbs_and_unchanging_ttbs.into_iter().partition(|t| {
+                let file = changes_files.iter().find(|cf| cf.contains(&t.base_start()));
+                if let Some(file) = file
+                    && let Some(first_date) = file.first()
+                {
+                    changes_collection.push(ChangesCollection {
+                        timetable: t.clone(),
+                        base_start_date: *first_date,
+                    });
+                    true
+                } else {
+                    false
+                }
+            });
+        debug!(
+            "ttc: {}, uct: {}, ct: {}",
+            ttbs_with_changes_needed.len(),
+            unchanging_ttb.len(),
+            changes_collection.len(),
+        );
+        // append the changing timetables to the timetables that need changing by linking them together
+        for timetable in &mut ttbs_with_changes_needed {
+            if let Some(changes_ttb) = changes_collection
                 .iter()
-                .any(|cf| cf.first() == Some(&v.base_start()))
-        });
-
-        let (timetables_to_append, timetables_that_shouldnt_be_changed): (Vec<_>, Vec<_>) =
-            timetables_that_probably_shouldnt_be_changed
-                .into_iter()
-                .partition(|t| changes_files.iter().any(|cf| cf.contains(&t.base_start())));
-
-        for timetable in timetables_that_should_be_changed {
-            if let Some(updated_timetables) = timetables_to_append
-                .iter()
-                .find(|append_timetable| append_timetable.base_start() == timetable.base_start())
+                .find(|changes_ttb| changes_ttb.base_start_date == timetable.base_start())
             {
+                info!(
+                    "Timetable {} has changes from timetable {}. Appending",
+                    timetable.base_start(),
+                    changes_ttb.timetable.base_start()
+                );
+                timetable.files.extend(changes_ttb.timetable.files.clone());
+                if let Some(ref mut changed_pages) = timetable.changed_pages {
+                    changed_pages.extend(changes_ttb.timetable.pages.clone());
+                } else {
+                    timetable.changed_pages = Some(changes_ttb.timetable.pages.clone())
+                };
             }
         }
+
+        let mut modified_timetables_list = unchanging_ttb;
+        modified_timetables_list.extend(ttbs_with_changes_needed);
+        modified_timetables_list
     }
 
     pub fn add_valid_from_data(

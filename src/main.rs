@@ -112,7 +112,7 @@ fn load_pdfs_and_index() -> Result<()> {
     };
     fs::remove_dir_all(COLLECTION_PATH)?;
 
-    let changed_files: Vec<Vec<Date>> = files
+    let changes_files: Vec<Vec<Date>> = files
         .changes_files
         .iter()
         .map(|v| valid_on::parse_dates_from_file(v))
@@ -131,6 +131,8 @@ fn load_pdfs_and_index() -> Result<()> {
     }
     timetable_collections =
         PdfTimetableCollection::add_valid_from_data(timetable_collections, files.valid_from_files);
+    timetable_collections =
+        PdfTimetableCollection::combine_from_changes_files(timetable_collections, changes_files);
     PdfTimetableCollection::save(&timetable_collections)?;
 
     for timetable in &timetable_collections {
