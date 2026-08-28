@@ -201,8 +201,8 @@ fn get_valid_timetables(
             new_timetables.push(recent_timetable);
         }
         new_timetables
-    } else if options == TTBOptions::OnlyFirst {
-        vec![current_timetables.pop().result_reason("No timetables")?]
+    // } else if options == TTBOptions::OnlyFirst {
+    // vec![current_timetables.pop().result_reason("No timetables")?]
     } else {
         current_timetables
     };
