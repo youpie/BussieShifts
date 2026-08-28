@@ -24,6 +24,11 @@ pub struct ShiftData {
     pub shift_prefix: String,
 }
 
+struct ChangesCollection {
+    timetable: PdfTimetableCollection,
+    base_start_date: Date,
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct PdfTimetableCollection {
     pub start_date: Date,
@@ -32,7 +37,7 @@ pub struct PdfTimetableCollection {
     pub pages: HashMap<String, ShiftData>,
     #[serde(skip)]
     /// Will be skipped during deserialization
-    pub shifts: Vec<Shift>,
+    pub shifts: HashMap<String, Shift>,
 }
 
 impl PdfTimetableCollection {
@@ -45,11 +50,17 @@ impl PdfTimetableCollection {
         // Load the PDF document.
         let shift_data_map = ShiftData::load(&pdf_path, file_id)?;
         let parsed_shifts = parse_pdf(&pdf_path, shift_data_map.clone())?;
+
         let start_date = parsed_shifts
             .first()
             .result_reason("No shifts found")?
             .starting_date;
-        // let valid_from_dates;
+
+        let mut parsed_shift_map = HashMap::new();
+        for shift in parsed_shifts {
+            parsed_shift_map.insert(shift.shift_nr.clone(), shift);
+        }
+
         if let Some(existing_collection) = existing_timetables
             .iter_mut()
             .find(|item| item.start_date == start_date)
@@ -59,7 +70,8 @@ impl PdfTimetableCollection {
                 .files
                 .insert(file_id, pdf_path.to_string_lossy().to_string());
             existing_collection.pages.extend(shift_data_map);
-            existing_collection.shifts.extend(parsed_shifts);
+
+            existing_collection.shifts.extend(parsed_shift_map);
             Ok(None)
         } else {
             info!("Writing new collection {:?}", &start_date);
@@ -68,9 +80,76 @@ impl PdfTimetableCollection {
                 start_date,
                 files: HashMap::from([(file_id, pdf_path.to_string_lossy().to_string())]),
                 pages: shift_data_map,
-                shifts: parsed_shifts,
+                shifts: parsed_shift_map,
             }))
         }
+    }
+
+    pub fn combine_from_changes_files(
+        timetables: Vec<Self>,
+        changes_files: Vec<Vec<Date>>,
+    ) -> Vec<Self> {
+        debug!(
+            "Timetables {}, changes {}",
+            timetables.len(),
+            changes_files.len()
+        );
+        // Timetables that need changing can be identified by their start date being found in a changes_file on the first line
+        // Partition finds these timetables and splits them, the rest are timetables that either don't need changing
+        // Or are changed timetables themselves
+        let (mut ttbs_with_changes_needed, changes_ttbs_and_unchanging_ttbs): (Vec<_>, Vec<_>) =
+            timetables.into_iter().partition(|v| {
+                changes_files
+                    .iter()
+                    .any(|cf| cf.first() == Some(&v.base_start()))
+            });
+        let mut changes_collection = Vec::new();
+        // changed timetables are identified by their start date being contained in a changes_file
+        // Because we already filtered out the timetables that need changes, we don't need to filter the first line
+        let (_changes_timetables, unchanging_ttb): (Vec<_>, Vec<_>) =
+            changes_ttbs_and_unchanging_ttbs.into_iter().partition(|t| {
+                let file = changes_files.iter().find(|cf| cf.contains(&t.base_start()));
+                if let Some(file) = file
+                    && let Some(first_date) = file.first()
+                {
+                    changes_collection.push(ChangesCollection {
+                        timetable: t.clone(),
+                        base_start_date: *first_date,
+                    });
+                    true
+                } else {
+                    false
+                }
+            });
+        debug!(
+            "ttc: {}, uct: {}, ct: {}",
+            ttbs_with_changes_needed.len(),
+            unchanging_ttb.len(),
+            changes_collection.len(),
+        );
+        // append the changing timetables to the timetables that need changing by linking them together
+        for timetable in &mut ttbs_with_changes_needed {
+            if let Some(changes_ttb) = changes_collection
+                .iter()
+                .find(|changes_ttb| changes_ttb.base_start_date == timetable.base_start())
+            {
+                info!(
+                    "Timetable {} has changes from timetable {}. Appending",
+                    timetable.base_start(),
+                    changes_ttb.timetable.base_start()
+                );
+                timetable.files.extend(changes_ttb.timetable.files.clone());
+                timetable.pages.extend(changes_ttb.timetable.pages.clone());
+
+                for shift in &changes_ttb.timetable.shifts {
+                    timetable.shifts.insert(shift.0.to_owned(), shift.1.clone());
+                }
+            }
+        }
+
+        let mut modified_timetables_list = unchanging_ttb;
+        modified_timetables_list.extend(ttbs_with_changes_needed);
+        modified_timetables_list
     }
 
     pub fn add_valid_from_data(
@@ -79,7 +158,7 @@ impl PdfTimetableCollection {
     ) -> Vec<Self> {
         let mut valid_froms = Vec::new();
         for valid_from_path in valid_from_paths {
-            valid_froms.push(valid_on::get_timetable_valid_on(valid_from_path));
+            valid_froms.push(valid_on::parse_dates_from_file(&valid_from_path));
         }
 
         let mut new_timetable_collections = Vec::new();
@@ -102,7 +181,14 @@ impl PdfTimetableCollection {
 
     pub fn save(collections: &Vec<Self>) -> Result<()> {
         for collection in collections {
-            Shift::save_extracted_shifts(collection.shifts.clone())?;
+            Shift::save_extracted_shifts(
+                collection
+                    .shifts
+                    .clone()
+                    .into_iter()
+                    .map(|(_id, score)| score)
+                    .collect(),
+            )?;
             let mut output_path = collection.collection_path();
             output_path.set_extension("json");
             fs::write(

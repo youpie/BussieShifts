@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use time::{Date, OffsetDateTime, Time, Weekday};
 
 use crate::{
-    ShiftQuery,
+    ShiftQuery, TTBOptions,
     collection::PdfTimetableCollection,
     get_valid_timetables,
     parsing::shift_structs::{JobType, Shift, ShiftJob, ShiftValidDay},
@@ -19,8 +19,15 @@ type Omloop = usize;
 type Index = u8;
 type DayOfTheWeek = u8;
 
+/*
+!!! Currently the get_all_omlopen function does not work satisfactory
+This is because it can only show a single dienstregeling. Which does not work with wijzigingen
+New feature: Wijzigingen in dienstregelingen should be absorbed to a single dienstregeling file
+And then the api should only search for a single dienstregeling file, instead of recusively searching */
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OmloopDayIndex {
+    timetable_date: Date,
     day_indexes: HashMap<Omloop, HashMap<DayOfTheWeek, Index>>,
 }
 
@@ -30,7 +37,7 @@ impl OmloopDayIndex {
         debug!("Indexing omlopen for timetable {}", timetable.base_start());
         let mut omlopen_map = HashMap::new();
         for shift in &timetable.shifts {
-            BusOmloopDay::new_or_extend(&mut omlopen_map, shift);
+            BusOmloopDay::new_or_extend(&mut omlopen_map, shift.1);
         }
 
         // create the valid days index map
@@ -59,6 +66,7 @@ impl OmloopDayIndex {
         }
 
         let index_map = Self {
+            timetable_date: timetable.base_start(),
             day_indexes: index_map_for_omloop,
         };
 
@@ -96,18 +104,18 @@ impl OmloopDayIndex {
 
     pub fn get_omloop(
         omloop: usize,
-        day: Weekday,
-        timetable: &PdfTimetableCollection,
+        day_of_week: Weekday,
+        timetable: PdfTimetableCollection,
     ) -> Result<String> {
-        let index_map = Self::load(timetable)?;
+        let index_map = Self::load(&timetable)?;
         let index = *index_map
             .day_indexes
             .get(&omloop)
-            .and_then(|v| v.get(&(day as u8)))
+            .and_then(|v| v.get(&(day_of_week as u8)))
             .result_reason("No omloop report found for that day")?;
         Ok(BusOmloopDay::load_string(
             omloop,
-            timetable.base_start(),
+            index_map.timetable_date,
             index,
         )?)
     }
@@ -235,12 +243,12 @@ pub async fn get_omloop(
     request: web::Path<usize>,
     query: web::Query<ShiftQuery>,
 ) -> impl Responder {
-    let (day_of_the_week, timetable) = match get_dow_and_timetable(query) {
+    let (day_of_the_week, timetables) = match get_dow_and_timetable(query) {
         Ok(v) => v,
         Err(v) => return v,
     };
 
-    match OmloopDayIndex::get_omloop(request.into_inner(), day_of_the_week, &timetable) {
+    match OmloopDayIndex::get_omloop(request.into_inner(), day_of_the_week, timetables) {
         Ok(v) => HttpResponse::Ok().content_type(ContentType::json()).body(v),
         Err(e) => return_error(e),
     }
@@ -267,13 +275,17 @@ fn get_dow_and_timetable(
     let date = date_query
         .date
         .as_ref()
-        .and_then(|date_string| Date::parse(date_string, DATE_FORMAT).ok())
+        .and_then(|date_string| {
+            Date::parse(date_string, DATE_FORMAT)
+                .warn_owned("parsing date")
+                .ok()
+        })
         .unwrap_or(OffsetDateTime::now_utc().date());
 
     let day_of_the_week = date.weekday();
 
-    let timetable = match get_valid_timetables(Some(date), false) {
-        Ok(timetable) if let Some(first_timetable) = timetable.0.last().cloned() => first_timetable,
+    let timetable = match get_valid_timetables(Some(date), TTBOptions::OnlyFirst) {
+        Ok(v) if let Some(first_timetable) = v.0.last().cloned() => first_timetable,
         _ => return Err(return_error(eyre!("Could not get timetable"))),
     };
 
