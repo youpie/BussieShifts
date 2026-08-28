@@ -15,7 +15,7 @@ Parse en serve Transdev dienstbriefjes
 4. Visit [0.0.0.0:8080/refresh](0.0.0.0:8080/refresh) to load everything
 5. party
 
-# How to use valid_on.txt & changes.txt
+# How to use valid_from.txt & changes.txt
 Sometimes a timetable is valid again after another timetable was valid, in this case `valid_on.txt` can be used to tell BussieShift that a timetable is valid multiple times. Every line after that should include a date in `DD-MM-YYYY` format. On that day the shift will be treated as new. The first line should specify the date of the _ingangsdatum_ of the actual dienstregeling
 `changes.txt` is for when a timetable has specific shifts which should be replaced by newer ones without updating the active timetable. It's format is the same as changes.txt
 
