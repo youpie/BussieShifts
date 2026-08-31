@@ -8,6 +8,7 @@ COPY ./src ./src
 COPY Cargo.lock ./
 COPY Cargo.toml ./
 
+RUN rustup default nightly
 
 RUN cargo install --path .
 
