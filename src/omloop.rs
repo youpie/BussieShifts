@@ -264,6 +264,7 @@ pub async fn get_omloop(
     request: web::Path<usize>,
     query: web::Query<ShiftQuery>,
 ) -> impl Responder {
+    info!("Got request for omloop {request} on {:?}", query.date);
     let (day_of_the_week, timetables) = match get_dow_and_timetable(query) {
         Ok(v) => v,
         Err(v) => return v,
@@ -277,6 +278,7 @@ pub async fn get_omloop(
 
 #[get("/omloop/index")]
 pub async fn get_omloop_overview(query: web::Query<ShiftQuery>) -> HttpResponse {
+    debug!("Got omloop index request on {:?}", query.date);
     let (day_of_the_week, timetable) = match get_dow_and_timetable(query) {
         Ok(v) => v,
         Err(v) => return v,
