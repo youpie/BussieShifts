@@ -11,4 +11,4 @@ COPY Cargo.toml ./
 
 RUN cargo install --path .
 
-CMD ["hermes_pdf_shift_http"]
+CMD ["BussieShift"]

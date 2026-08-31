@@ -28,7 +28,7 @@ And then the api should only search for a single dienstregeling file, instead of
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OmloopDayIndex {
     timetable_date: Date,
-    day_indexes: HashMap<Omloop, HashMap<DayOfTheWeek, Index>>,
+    day_indexes: HashMap<Omloop, HashMap<DayOfTheWeek, Vec<Index>>>,
 }
 
 impl OmloopDayIndex {
@@ -52,6 +52,11 @@ impl OmloopDayIndex {
             // then MA and DI and WO have index 0
             // And DO and VR     have index 1
             // ZA/ZO simply have no entry as the omloop is not used on that day
+            // Sometimes a shift is valid on for example
+            // MA/DI/WO
+            // and WO only
+            // In that case we need to combine multiple omloop files into one.
+            // That is why the index is a vec. multiple indexes can be valid on one day
             let index_entry = current_index_for_omloop.entry(omloop.0.0).or_insert(0);
             for valid_day in omloop.0.1 {
                 // For every day this omloop with this day array is valid, add an entry to the map
@@ -59,7 +64,9 @@ impl OmloopDayIndex {
                 index_map_for_omloop
                     .entry(omloop.0.0)
                     .or_insert(HashMap::new())
-                    .insert(valid_day as u8, *index_entry);
+                    .entry(valid_day as u8)
+                    .or_insert(vec![])
+                    .push(*index_entry);
             }
             omloop.1.save(timetable.base_start(), *index_entry)?;
             *index_entry += 1;
@@ -77,7 +84,7 @@ impl OmloopDayIndex {
     fn save(&self, timetable: &PdfTimetableCollection) -> Result<()> {
         _ = std::fs::create_dir_all(get_base_path(timetable.base_start()));
         let path = Self::path(timetable, false);
-        fs::write(path, serde_json::to_string(self)?).note("Failed to save OmloopIndex")?;
+        fs::write(path, serde_json::to_string_pretty(self)?).note("Failed to save OmloopIndex")?;
         let path = Self::path(timetable, true);
         fs::write(path, postcard::to_allocvec(self)?)?;
         Ok(())
@@ -108,16 +115,20 @@ impl OmloopDayIndex {
         timetable: PdfTimetableCollection,
     ) -> Result<String> {
         let index_map = Self::load(&timetable)?;
-        let index = *index_map
+        let indexes = index_map
             .day_indexes
             .get(&omloop)
             .and_then(|v| v.get(&(day_of_week as u8)))
-            .result_reason("No omloop report found for that day")?;
-        Ok(BusOmloopDay::load_string(
-            omloop,
-            index_map.timetable_date,
-            index,
-        )?)
+            .result_reason("No omloop report found for that day")?
+            .clone();
+
+        let multiple_omlopen: Vec<_> = indexes
+            .iter()
+            .filter_map(|ix| BusOmloopDay::load(omloop, index_map.timetable_date, *ix).ok())
+            .collect();
+        let combined = BusOmloopDay::combine_multiple(multiple_omlopen);
+
+        Ok(serde_json::to_string_pretty(&combined)?)
     }
 
     pub fn get_all_omloop(day: Weekday, timetable: &PdfTimetableCollection) -> Result<String> {
@@ -133,7 +144,7 @@ impl OmloopDayIndex {
 }
 
 /// Added the shift number to the omloop
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
 struct ShiftJobExtended {
     job_type: JobType,
     start: Option<Time>,
@@ -142,7 +153,6 @@ struct ShiftJobExtended {
     end_location: Option<String>,
     rit: Option<usize>,
     shift: String,
-    #[serde(skip)]
     next_day: bool,
 }
 
@@ -161,11 +171,10 @@ impl ShiftJobExtended {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct BusOmloopDay {
     omloop: usize,
     jobs: Vec<ShiftJobExtended>,
-    day_index: u8,
 }
 
 impl BusOmloopDay {
@@ -186,7 +195,6 @@ impl BusOmloopDay {
                     let new_omloop_day = Self {
                         omloop: job_omloop,
                         jobs: vec![ShiftJobExtended::from_job(&shift, job.clone())],
-                        day_index: 0,
                     };
                     omlopen.insert((job_omloop, shift.valid_days.clone()), new_omloop_day);
                 }
@@ -194,22 +202,35 @@ impl BusOmloopDay {
         }
     }
 
-    pub(self) fn _load(omloop: Omloop, start_date: Date, index: u8) -> Result<Self> {
-        Ok(serde_json::from_str(&Self::load_string(
-            omloop, start_date, index,
-        )?)?)
+    pub(self) fn load(omloop: Omloop, start_date: Date, index: u8) -> Result<Self> {
+        let mut path = Self::get_path(omloop, start_date, index);
+        path.set_extension("bin");
+        Ok(postcard::from_bytes(fs::read(path)?.as_slice())?)
     }
 
-    pub fn load_string(omloop: Omloop, start_date: Date, index: u8) -> Result<String> {
+    pub fn _load_string(omloop: Omloop, start_date: Date, index: u8) -> Result<String> {
         let path = Self::get_path(omloop, start_date, index);
         debug!("Trying to load omloop {path:?}");
         Ok(fs::read_to_string(path)?)
     }
 
+    pub(self) fn combine_multiple(omlopen: Vec<Self>) -> Self {
+        let mut combined = BusOmloopDay::default();
+        for mut omloop in omlopen {
+            combined.omloop = omloop.omloop;
+            combined.jobs.append(&mut omloop.jobs);
+        }
+        combined.sort_jobs();
+        combined
+    }
+
     pub(self) fn save(&self, start_date: Date, index: u8) -> Result<()> {
-        let path = Self::get_path(self.omloop, start_date, index);
+        let mut path = Self::get_path(self.omloop, start_date, index);
         _ = std::fs::create_dir_all(get_base_path(start_date));
-        Ok(fs::write(path, serde_json::to_string_pretty(self)?)?)
+        fs::write(&path, serde_json::to_string_pretty(self)?)?;
+        path.set_extension("bin");
+        fs::write(&path, postcard::to_allocvec(&self)?)?;
+        Ok(())
     }
 
     pub(self) fn sort_jobs(&mut self) {
