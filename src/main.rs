@@ -8,7 +8,6 @@ use actix_web::{App, HttpResponse, HttpServer, Responder, get, web};
 use color_eyre::eyre;
 use index::handle_index_request;
 use qpdf::QPdf;
-use serde::Deserialize;
 use std::ffi::OsStr;
 use std::fs::{self};
 use std::hash::{DefaultHasher, Hash, Hasher};

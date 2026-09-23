@@ -18,26 +18,25 @@ ehvbst
 
 use std::{collections::HashMap, fs, path::PathBuf};
 
-use ouroboros::self_referencing;
+use time::Time;
 
-use crate::prelude::*;
+use crate::{
+    omloop::{BusOmloopDay, ShiftJobExtended},
+    prelude::*,
+};
 
-type GeneralLocation<'a> = &'a str;
-type SpecificLocation<'a> = &'a str;
+type GeneralLocation = String;
+type SpecificLocation = String;
 
-#[self_referencing]
-struct DeadheadLocations {
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct DeadheadLocations {
     locations_vec: Vec<(String, Vec<String>)>,
-    #[borrows(locations_vec)]
-    #[covariant]
-    specific_to_general_map: HashMap<SpecificLocation<'this>, GeneralLocation<'this>>,
-    #[borrows(locations_vec)]
-    #[covariant]
-    general_to_specific_map: HashMap<GeneralLocation<'this>, SpecificLocation<'this>>,
+    specific_to_general_map: HashMap<SpecificLocation, GeneralLocation>,
+    general_to_specific_map: HashMap<GeneralLocation, SpecificLocation>,
 }
 
 impl DeadheadLocations {
-    fn load() -> Result<Self> {
+    pub fn load() -> Result<Self> {
         let path = PathBuf::from("locations.txt");
         let locations_file = fs::read_to_string(path)?;
         let mut locations_unit = Self {
@@ -49,10 +48,10 @@ impl DeadheadLocations {
             g.1.iter().for_each(|spec| {
                 locations_unit
                     .specific_to_general_map
-                    .insert(g.0.as_str(), spec.as_str());
+                    .insert(g.0.clone(), spec.clone());
                 locations_unit
                     .general_to_specific_map
-                    .insert(spec.as_str(), g.0.as_str());
+                    .insert(spec.clone(), g.0.clone());
             })
         });
 
@@ -77,5 +76,97 @@ impl DeadheadLocations {
             }
         }
         locations
+    }
+
+    pub fn get_general_location(&self, specific_location: &str) -> Option<&str> {
+        self.specific_to_general_map
+            .get(specific_location)
+            .map(|v| v.as_str())
+    }
+
+    pub fn get_specific_location(&self, general_location: &str) -> Option<&str> {
+        self.general_to_specific_map
+            .get(general_location)
+            .map(|v| v.as_str())
+    }
+}
+
+struct DeadheadLocation<'a, 'b> {
+    general: Option<&'b str>,
+    specific: &'a str,
+}
+
+impl<'a, 'b> DeadheadLocation<'a, 'b> {
+    pub fn new(specific_location: &'a str, deadhead_locations: &'b DeadheadLocations) -> Self {
+        Self {
+            general: deadhead_locations.get_general_location(&specific_location),
+            specific: specific_location,
+        }
+    }
+
+    pub fn is_unknown_location(&self) -> bool {
+        self.general.is_none()
+    }
+}
+
+struct Deadhead<'a, 'b> {
+    from: DeadheadLocation<'a, 'b>,
+    to: DeadheadLocation<'a, 'b>,
+    start: Time,
+    end: Time,
+    omloop: Omloop,
+}
+
+impl<'a, 'b> Deadhead<'a, 'b> {
+    fn from_extended_job(
+        job: &'a ShiftJobExtended,
+        omloop: Omloop,
+        deadhead_locations: &'b DeadheadLocations,
+    ) -> Self {
+        Self {
+            from: DeadheadLocation::new(&job.start_location.as_ref().unwrap(), deadhead_locations),
+            to: DeadheadLocation::new(&job.end_location.as_ref().unwrap(), deadhead_locations),
+            start: job.start.unwrap_or(Time::MAX),
+            end: job.end.unwrap_or(Time::MAX),
+            omloop,
+        }
+    }
+
+    fn is_unknown_location(&self) -> bool {
+        self.from.is_unknown_location() || self.to.is_unknown_location()
+    }
+
+    pub fn from_omloop(
+        omloop_map: &'a BusOmloopDay,
+        deadhead_locations: &'b DeadheadLocations,
+    ) -> Vec<Self> {
+        let omloop = omloop_map.omloop;
+        let deadheads = omloop_map.get_filled_deadheads();
+        let mapped_deadheads: Vec<Deadhead<'_, '_>> = deadheads
+            .into_iter()
+            .filter_map(
+                |d| match Self::from_extended_job(d, omloop, deadhead_locations) {
+                    val if val.is_unknown_location() => None,
+                    val => Some(val),
+                },
+            )
+            .collect();
+        mapped_deadheads
+    }
+
+    pub fn for_specific_location(
+        deadheads: &'a Vec<Self>,
+        from_general_location: &str,
+        to_general_location: &str,
+    ) -> Vec<&'a Self> {
+        let mut matching_deadheads = Vec::new();
+        for deadhead in deadheads {
+            if deadhead.from.general == Some(from_general_location)
+                && deadhead.to.general == Some(to_general_location)
+            {
+                matching_deadheads.push(deadhead);
+            }
+        }
+        matching_deadheads
     }
 }

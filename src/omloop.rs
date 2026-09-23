@@ -8,14 +8,15 @@ use time::{Date, OffsetDateTime, Time, Weekday};
 use crate::{
     ShiftQuery, TTBOptions,
     collection::PdfTimetableCollection,
+    deadhead::DeadheadLocations,
     get_valid_timetables,
-    parsing::shift_structs::{JobType, Shift, ShiftJob, ShiftValidDay},
+    parsing::shift_structs::{JobDrivingType, JobType, Shift, ShiftJob, ShiftValidDay},
     return_error,
 };
 
 use crate::prelude::*;
 
-type Omloop = usize;
+pub type Omloop = usize;
 type Index = u8;
 type DayOfTheWeek = u8;
 
@@ -29,6 +30,7 @@ And then the api should only search for a single dienstregeling file, instead of
 pub struct OmloopDayIndex {
     timetable_date: Date,
     day_indexes: HashMap<Omloop, HashMap<DayOfTheWeek, Vec<Index>>>,
+    deadhead_locations: DeadheadLocations,
 }
 
 impl OmloopDayIndex {
@@ -72,9 +74,12 @@ impl OmloopDayIndex {
             *index_entry += 1;
         }
 
+        let deadhead_locations = DeadheadLocations::load().note("Failed to load deadhead file")?;
+
         let index_map = Self {
             timetable_date: timetable.base_start(),
             day_indexes: index_map_for_omloop,
+            deadhead_locations,
         };
 
         index_map.save(timetable)?;
@@ -131,6 +136,8 @@ impl OmloopDayIndex {
         Ok(serde_json::to_string_pretty(&combined)?)
     }
 
+    pub fn get_deadhead() {}
+
     pub fn get_all_omloop(day: Weekday, timetable: &PdfTimetableCollection) -> Result<String> {
         let date_index = Self::load(timetable)?;
         let omlopen = date_index
@@ -145,15 +152,15 @@ impl OmloopDayIndex {
 
 /// Added the shift number to the omloop
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
-struct ShiftJobExtended {
-    job_type: JobType,
-    start: Option<Time>,
-    end: Option<Time>,
-    start_location: Option<String>,
-    end_location: Option<String>,
-    rit: Option<usize>,
-    shift: String,
-    next_day: bool,
+pub struct ShiftJobExtended {
+    pub job_type: JobType,
+    pub start: Option<Time>,
+    pub end: Option<Time>,
+    pub start_location: Option<String>,
+    pub end_location: Option<String>,
+    pub rit: Option<usize>,
+    pub shift: String,
+    pub next_day: bool,
 }
 
 impl ShiftJobExtended {
@@ -173,7 +180,7 @@ impl ShiftJobExtended {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct BusOmloopDay {
-    omloop: usize,
+    pub omloop: usize,
     jobs: Vec<ShiftJobExtended>,
 }
 
@@ -222,6 +229,22 @@ impl BusOmloopDay {
         }
         combined.sort_jobs();
         combined
+    }
+
+    pub fn get_filled_deadheads(&self) -> Vec<&ShiftJobExtended> {
+        self.jobs
+            .iter()
+            .filter(|j| {
+                j.job_type
+                    == JobType::Rijden {
+                        drive_type: JobDrivingType::Mat,
+                    }
+                    && j.end.is_some()
+                    && j.start.is_some()
+                    && j.start_location.is_some()
+                    && j.end_location.is_some()
+            })
+            .collect()
     }
 
     pub(self) fn save(&self, start_date: Date, index: u8) -> Result<()> {
