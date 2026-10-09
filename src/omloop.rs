@@ -1,14 +1,13 @@
 use std::{collections::HashMap, fs, path::PathBuf};
 
 use actix_web::{HttpResponse, Responder, get, http::header::ContentType, web};
-use color_eyre::Section;
 use serde::{Deserialize, Serialize};
 use time::{Date, OffsetDateTime, Time, Weekday};
 
 use crate::{
     ShiftQuery, TTBOptions,
     collection::PdfTimetableCollection,
-    deadhead::DeadheadLocations,
+    deadhead::{DeadheadCollection, DeadheadLocations},
     get_valid_timetables,
     parsing::shift_structs::{JobDrivingType, JobType, Shift, ShiftJob, ShiftValidDay},
     return_error,
@@ -29,13 +28,15 @@ And then the api should only search for a single dienstregeling file, instead of
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OmloopDayIndex {
     timetable_date: Date,
-    day_indexes: HashMap<Omloop, HashMap<DayOfTheWeek, Vec<Index>>>,
-    deadhead_locations: DeadheadLocations,
+    pub day_indexes: HashMap<Omloop, HashMap<DayOfTheWeek, Vec<Index>>>,
 }
 
 impl OmloopDayIndex {
     /// Will also save omloops and Self to disk
-    pub fn new_omloop_timetable(timetable: &PdfTimetableCollection) -> Result<Self> {
+    pub fn new_omloop_timetable(
+        timetable: &PdfTimetableCollection,
+        deadhead_locations: &DeadheadLocations,
+    ) -> Result<Self> {
         debug!("Indexing omlopen for timetable {}", timetable.base_start());
         let mut omlopen_map = HashMap::new();
         for shift in &timetable.shifts {
@@ -45,6 +46,7 @@ impl OmloopDayIndex {
         // create the valid days index map
         let mut index_map_for_omloop = HashMap::new();
         let mut current_index_for_omloop: HashMap<Omloop, Index> = HashMap::new();
+        let mut omlopen = Vec::new();
         for mut omloop in omlopen_map {
             omloop.1.sort_jobs();
             // Find the current valid index for a given omloop
@@ -70,24 +72,26 @@ impl OmloopDayIndex {
                     .or_insert(vec![])
                     .push(*index_entry);
             }
-            omloop.1.save(timetable.base_start(), *index_entry)?;
+            omloop
+                .1
+                .save(omloop.1.omloop, timetable.base_start(), *index_entry)
+                .warn("saving omlopen");
+            omlopen.push((omloop.1, *index_entry));
             *index_entry += 1;
         }
-
-        let deadhead_locations = DeadheadLocations::load().note("Failed to load deadhead file")?;
 
         let index_map = Self {
             timetable_date: timetable.base_start(),
             day_indexes: index_map_for_omloop,
-            deadhead_locations,
         };
 
         index_map.save(timetable)?;
+        DeadheadCollection::for_every_weekday(deadhead_locations, timetable)?;
         Ok(index_map)
     }
 
     fn save(&self, timetable: &PdfTimetableCollection) -> Result<()> {
-        _ = std::fs::create_dir_all(get_base_path(timetable.base_start()));
+        _ = std::fs::create_dir_all(BusOmloopDay::get_base_path(timetable.base_start()));
         let path = Self::path(timetable, false);
         fs::write(path, serde_json::to_string_pretty(self)?).note("Failed to save OmloopIndex")?;
         let path = Self::path(timetable, true);
@@ -117,8 +121,8 @@ impl OmloopDayIndex {
     pub fn get_omloop(
         omloop: usize,
         day_of_week: Weekday,
-        timetable: PdfTimetableCollection,
-    ) -> Result<String> {
+        timetable: &PdfTimetableCollection,
+    ) -> Result<BusOmloopDay> {
         let index_map = Self::load(&timetable)?;
         let indexes = index_map
             .day_indexes
@@ -133,12 +137,12 @@ impl OmloopDayIndex {
             .collect();
         let combined = BusOmloopDay::combine_multiple(multiple_omlopen);
 
-        Ok(serde_json::to_string_pretty(&combined)?)
+        Ok(combined)
     }
 
-    pub fn get_deadhead() {}
+    pub fn get_deadheads(from_general_location: &str, to_general_location: &str) {}
 
-    pub fn get_all_omloop(day: Weekday, timetable: &PdfTimetableCollection) -> Result<String> {
+    pub fn get_all_omloop(day: Weekday, timetable: &PdfTimetableCollection) -> Result<Vec<Omloop>> {
         let date_index = Self::load(timetable)?;
         let omlopen = date_index
             .day_indexes
@@ -146,7 +150,7 @@ impl OmloopDayIndex {
             .filter(|v| v.1.contains_key(&(day as u8)))
             .map(|v| *v.0)
             .collect::<Vec<usize>>();
-        Ok(serde_json::to_string_pretty(&omlopen)?)
+        Ok(omlopen)
     }
 }
 
@@ -232,7 +236,8 @@ impl BusOmloopDay {
     }
 
     pub fn get_filled_deadheads(&self) -> Vec<&ShiftJobExtended> {
-        self.jobs
+        let filtered_jobs: Vec<&ShiftJobExtended> = self
+            .jobs
             .iter()
             .filter(|j| {
                 j.job_type
@@ -244,16 +249,14 @@ impl BusOmloopDay {
                     && j.start_location.is_some()
                     && j.end_location.is_some()
             })
-            .collect()
-    }
+            .collect();
+        trace!(
+            "Omloop has {} jobs, {} of which are relevant",
+            self.jobs.len(),
+            filtered_jobs.len()
+        );
 
-    pub(self) fn save(&self, start_date: Date, index: u8) -> Result<()> {
-        let mut path = Self::get_path(self.omloop, start_date, index);
-        _ = std::fs::create_dir_all(get_base_path(start_date));
-        fs::write(&path, serde_json::to_string_pretty(self)?)?;
-        path.set_extension("bin");
-        fs::write(&path, postcard::to_allocvec(&self)?)?;
-        Ok(())
+        return filtered_jobs;
     }
 
     pub(self) fn sort_jobs(&mut self) {
@@ -265,21 +268,38 @@ impl BusOmloopDay {
         same_day.append(&mut next_day);
         self.jobs = same_day;
     }
+}
 
-    pub(self) fn get_path(omloop: Omloop, start_date: Date, index: u8) -> PathBuf {
-        let mut path = get_base_path(start_date);
+impl OmloopCollectionIO for BusOmloopDay {
+    const PATH: &str = "omlopen";
+}
+
+pub trait OmloopCollectionIO: Serialize {
+    const PATH: &str;
+
+    fn get_path(omloop: Omloop, start_date: Date, index: u8) -> PathBuf {
+        let mut path = Self::get_base_path(start_date);
         path.push(Self::get_filename(omloop, index));
         path
     }
 
-    pub(self) fn get_filename(omloop: Omloop, index: u8) -> String {
+    fn save(&self, omloop: Omloop, start_date: Date, index: u8) -> Result<()> {
+        let mut path = Self::get_path(omloop, start_date, index);
+        _ = std::fs::create_dir_all(Self::get_base_path(start_date));
+        fs::write(&path, serde_json::to_string_pretty(self)?)?;
+        path.set_extension("bin");
+        fs::write(&path, postcard::to_allocvec(&self)?)?;
+        Ok(())
+    }
+
+    fn get_filename(omloop: Omloop, index: u8) -> String {
         format!("{index}_{omloop}.json")
     }
-}
 
-fn get_base_path(start_date: Date) -> PathBuf {
-    let start_date = start_date.format(DATE_FORMAT).unwrap();
-    PathBuf::from(format!("{COLLECTION_PATH}/{start_date}/{OMLOOP_PATH}/"))
+    fn get_base_path(start_date: Date) -> PathBuf {
+        let start_date = start_date.format(DATE_FORMAT).unwrap();
+        PathBuf::from(format!("{COLLECTION_PATH}/{start_date}/{}/", Self::PATH))
+    }
 }
 
 #[get("/omloop/{omloop_number}")]
@@ -293,8 +313,11 @@ pub async fn get_omloop(
         Err(v) => return v,
     };
 
-    match OmloopDayIndex::get_omloop(request.into_inner(), day_of_the_week, timetables) {
-        Ok(v) => HttpResponse::Ok().content_type(ContentType::json()).body(v),
+    match OmloopDayIndex::get_omloop(request.into_inner(), day_of_the_week, &timetables)
+        .map(|i| serde_json::to_string_pretty(&i))
+    {
+        Ok(Ok(v)) => HttpResponse::Ok().content_type(ContentType::json()).body(v),
+        Ok(Err(e)) => return_error(e.into()),
         Err(e) => return_error(e),
     }
 }
@@ -307,10 +330,13 @@ pub async fn get_omloop_overview(query: web::Query<ShiftQuery>) -> HttpResponse 
         Err(v) => return v,
     };
 
-    match OmloopDayIndex::get_all_omloop(day_of_the_week, &timetable) {
-        Ok(omlopen) => HttpResponse::Ok()
+    match OmloopDayIndex::get_all_omloop(day_of_the_week, &timetable)
+        .map(|omlopen| serde_json::to_string_pretty(&omlopen))
+    {
+        Ok(Ok(omlopen)) => HttpResponse::Ok()
             .content_type(ContentType::json())
             .body(omlopen),
+        Ok(Err(e)) => return_error(e.into()),
         Err(e) => return_error(e),
     }
 }

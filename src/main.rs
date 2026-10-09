@@ -1,4 +1,5 @@
 use crate::collection::{PdfTimetableCollection, ShiftData};
+use crate::deadhead::DeadheadLocations;
 use crate::omloop::{OmloopDayIndex, get_omloop, get_omloop_overview};
 use crate::parsing::shift_structs::Shift;
 use crate::parsing::valid_on;
@@ -19,10 +20,6 @@ use time::{Date, OffsetDateTime};
 use walkdir::WalkDir;
 
 pub use crate::prelude::*;
-
-extern crate pretty_env_logger;
-#[macro_use]
-extern crate log;
 
 pub mod prelude;
 
@@ -134,8 +131,11 @@ fn load_pdfs_and_index() -> Result<()> {
         PdfTimetableCollection::combine_from_changes_files(timetable_collections, changes_files);
     PdfTimetableCollection::save(&timetable_collections)?;
 
+    let deadhead_locations = DeadheadLocations::load().note("Failed to load deadhead file")?;
+    deadhead_locations.debug_locations();
+
     for timetable in &timetable_collections {
-        OmloopDayIndex::new_omloop_timetable(timetable).unwrap();
+        OmloopDayIndex::new_omloop_timetable(timetable, &deadhead_locations).unwrap();
     }
 
     PdfTimetableCollection::load_to_global()?;
@@ -353,7 +353,7 @@ fn find_pdf_shift(
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    pretty_env_logger::init();
+    tracing_subscriber::fmt::init();
     // Load shift data
     info!("Indexing trip sheets");
     // Get the hash of all files in the folder. If anything changes, the hash changes and so it will reindex
