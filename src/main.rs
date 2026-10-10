@@ -394,6 +394,8 @@ async fn main() -> std::io::Result<()> {
             .service(get_shift)
             .service(get_omloop_overview)
             .service(get_omloop)
+            .service(deadhead::get_deadheads)
+            .service(deadhead::get_locations)
     })
     .bind("0.0.0.0:8080")?
     .run()

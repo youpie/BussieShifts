@@ -18,13 +18,17 @@ ehvbst
 
 use std::{collections::HashMap, fs, path::PathBuf};
 
-use time::{Time, Weekday, iter::WeekdayIter};
-use tracing::{info_span, trace_span};
+use actix_web::{HttpResponse, get, http::header::ContentType, web};
+use time::{Time, Weekday};
+use tracing::info_span;
 
 use crate::{
     collection::PdfTimetableCollection,
-    omloop::{BusOmloopDay, OmloopCollectionIO, OmloopDayIndex, ShiftJobExtended},
+    omloop::{
+        BusOmloopDay, OmloopCollectionIO, OmloopDayIndex, ShiftJobExtended, get_dow_and_timetable,
+    },
     prelude::*,
+    return_error,
 };
 
 type GeneralLocation = String;
@@ -76,6 +80,7 @@ impl DeadheadLocations {
         for line in file.lines() {
             if line.contains("> ") {
                 let specific_location = line.replace("> ", "");
+                debug!("Found location {specific_location}");
                 location.0 = specific_location;
                 general_found = true;
             } else if line.is_empty() && general_found {
@@ -86,6 +91,11 @@ impl DeadheadLocations {
                 location.1.push(line.to_owned());
             }
         }
+
+        if general_found {
+            locations.push(location);
+        }
+
         locations
     }
 
@@ -189,26 +199,33 @@ impl<'a> DeadheadCollection<'a> {
 
     pub fn for_general_location(
         &'a self,
-        from_general_location: &str,
+        // from_general_location: &str,
         to_general_location: &str,
     ) -> Vec<&'a Deadhead<'a, 'a>> {
         let mut matching_deadheads = Vec::new();
         for deadhead in &self.deadheads {
-            if deadhead.from.general == Some(from_general_location)
-                && deadhead.to.general == Some(to_general_location)
-            {
+            // if deadhead.from.general == Some(from_general_location)
+            if deadhead.to.general == Some(to_general_location) {
                 matching_deadheads.push(deadhead);
             }
         }
         matching_deadheads
     }
 
-    pub fn combine(&mut self, new_collection: Self) -> &Self {
-        for deadhead in new_collection.deadheads {
-            self.deadheads.push(deadhead);
-        }
+    pub fn load_byes_from_general_location(
+        weekday: Weekday,
+        location: &'a str,
+        timetable: &PdfTimetableCollection,
+    ) -> Result<Vec<u8>> {
+        let mut path = Self::get_path(weekday as usize, timetable.base_start(), location);
+        path.set_extension("bin");
+        Ok(fs::read(path)?)
+    }
 
-        self
+    pub fn load_deadheads_from_file(bytes: &'a Vec<u8>) -> Result<DeadheadCollection<'a>> {
+        Ok(postcard::from_bytes::<DeadheadCollection<'a>>(
+            bytes.as_slice(),
+        )?)
     }
 
     pub fn for_every_weekday(
@@ -243,13 +260,14 @@ impl<'a> DeadheadCollection<'a> {
             }
             deadheads_this_day.deadheads.sort_by_key(|i| i.start);
             deadheads_this_day
-                .save(day.0 as usize, timetable.base_start(), 0)
-                .warn("saving");
+                .split_by_general_location()
+                .into_iter()
+                .map(|v| v.1.save(day.0 as usize, timetable.base_start(), v.0))
+                .collect::<Result<()>>()
+                .warn("saving deadheads for a location");
         }
         Ok(())
     }
-
-    pub fn load_from_weekday(index: OmloopDayIndex, weekday: Weekday) {}
 
     pub fn from_omloop(
         omloop_map: &'a BusOmloopDay,
@@ -258,8 +276,75 @@ impl<'a> DeadheadCollection<'a> {
         let deadheads = Deadhead::from_omloop(omloop_map, deadhead_locations);
         Self::new(deadheads)
     }
+
+    fn split_by_general_location(self) -> Vec<(&'a str, Self)> {
+        let mut locations_map: HashMap<&str, Vec<Deadhead>> = HashMap::new();
+        for deadhead in self.deadheads {
+            if let Some(location) = deadhead.from.general
+                && !deadhead.to.is_unknown_location()
+            {
+                locations_map.entry(location).or_default().push(deadhead);
+            }
+        }
+
+        locations_map
+            .into_iter()
+            .map(|v| (v.0, Self::new(v.1)))
+            .collect::<Vec<_>>()
+    }
+
+    fn combine(&mut self, new_collection: Self) -> &Self {
+        for deadhead in new_collection.deadheads {
+            self.deadheads.push(deadhead);
+        }
+        self
+    }
 }
 
-impl OmloopCollectionIO for DeadheadCollection<'_> {
+impl<'a> OmloopCollectionIO for DeadheadCollection<'a> {
     const PATH: &str = "deadheads";
+    type IndexType = &'a str;
+}
+
+#[derive(Deserialize)]
+struct DeadheadQuery {
+    date: Option<String>,
+    from: String,
+    to: String,
+}
+
+#[get("/deadheads")]
+pub async fn get_deadheads(query: web::Query<DeadheadQuery>) -> HttpResponse {
+    let (weekday, timetable) = match get_dow_and_timetable(query.date.as_deref()) {
+        Ok(v) => v,
+        Err(v) => return v,
+    };
+
+    match DeadheadCollection::load_byes_from_general_location(weekday, &query.from, &timetable)
+        .map(|v| {
+            DeadheadCollection::load_deadheads_from_file(&v).map(|i| {
+                Ok(serde_json::to_string_pretty(
+                    &i.for_general_location(&query.to),
+                )?)
+            })
+        })
+        .flatten()
+        .flatten()
+    {
+        Ok(v) => HttpResponse::Ok().content_type(ContentType::json()).body(v),
+        Err(e) => return_error(e),
+    }
+}
+
+#[get("/deadheads/locations")]
+pub async fn get_locations() -> HttpResponse {
+    match DeadheadLocations::load()
+        .map(|v| Ok(serde_json::to_string(&v.locations_vec)?))
+        .flatten()
+    {
+        Ok(val) => HttpResponse::Ok()
+            .content_type(ContentType::json())
+            .body(val),
+        Err(e) => return_error(e),
+    }
 }

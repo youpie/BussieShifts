@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{collections::HashMap, fmt::Display, fs, path::PathBuf};
 
 use actix_web::{HttpResponse, Responder, get, http::header::ContentType, web};
 use serde::{Deserialize, Serialize};
@@ -140,8 +140,6 @@ impl OmloopDayIndex {
         Ok(combined)
     }
 
-    pub fn get_deadheads(from_general_location: &str, to_general_location: &str) {}
-
     pub fn get_all_omloop(day: Weekday, timetable: &PdfTimetableCollection) -> Result<Vec<Omloop>> {
         let date_index = Self::load(timetable)?;
         let omlopen = date_index
@@ -270,20 +268,22 @@ impl BusOmloopDay {
     }
 }
 
-impl OmloopCollectionIO for BusOmloopDay {
+impl<'a> OmloopCollectionIO for BusOmloopDay {
     const PATH: &str = "omlopen";
+    type IndexType = u8;
 }
 
 pub trait OmloopCollectionIO: Serialize {
     const PATH: &str;
+    type IndexType: Display;
 
-    fn get_path(omloop: Omloop, start_date: Date, index: u8) -> PathBuf {
+    fn get_path(omloop: Omloop, start_date: Date, index: Self::IndexType) -> PathBuf {
         let mut path = Self::get_base_path(start_date);
         path.push(Self::get_filename(omloop, index));
         path
     }
 
-    fn save(&self, omloop: Omloop, start_date: Date, index: u8) -> Result<()> {
+    fn save(&self, omloop: Omloop, start_date: Date, index: Self::IndexType) -> Result<()> {
         let mut path = Self::get_path(omloop, start_date, index);
         _ = std::fs::create_dir_all(Self::get_base_path(start_date));
         fs::write(&path, serde_json::to_string_pretty(self)?)?;
@@ -292,7 +292,7 @@ pub trait OmloopCollectionIO: Serialize {
         Ok(())
     }
 
-    fn get_filename(omloop: Omloop, index: u8) -> String {
+    fn get_filename(omloop: Omloop, index: Self::IndexType) -> String {
         format!("{index}_{omloop}.json")
     }
 
@@ -307,8 +307,8 @@ pub async fn get_omloop(
     request: web::Path<usize>,
     query: web::Query<ShiftQuery>,
 ) -> impl Responder {
-    info!("Got request for omloop {request} on {:?}", query.date);
-    let (day_of_the_week, timetables) = match get_dow_and_timetable(query) {
+    info!("Got request for omloop {request} on {:?}", &query.date);
+    let (day_of_the_week, timetables) = match get_dow_and_timetable(query.date.as_deref()) {
         Ok(v) => v,
         Err(v) => return v,
     };
@@ -325,7 +325,7 @@ pub async fn get_omloop(
 #[get("/omloop/index")]
 pub async fn get_omloop_overview(query: web::Query<ShiftQuery>) -> HttpResponse {
     debug!("Got omloop index request on {:?}", query.date);
-    let (day_of_the_week, timetable) = match get_dow_and_timetable(query) {
+    let (day_of_the_week, timetable) = match get_dow_and_timetable(query.date.as_deref()) {
         Ok(v) => v,
         Err(v) => return v,
     };
@@ -341,12 +341,10 @@ pub async fn get_omloop_overview(query: web::Query<ShiftQuery>) -> HttpResponse 
     }
 }
 
-fn get_dow_and_timetable(
-    date_query: web::Query<ShiftQuery>,
+pub fn get_dow_and_timetable(
+    date_string: Option<&str>,
 ) -> Result<(Weekday, PdfTimetableCollection), HttpResponse> {
-    let date = date_query
-        .date
-        .as_ref()
+    let date = date_string
         .and_then(|date_string| {
             Date::parse(date_string, DATE_FORMAT)
                 .warn_owned("parsing date")
