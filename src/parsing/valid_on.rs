@@ -2,6 +2,8 @@ use std::{fs, path::PathBuf};
 
 use time::Date;
 
+use super::*;
+
 /// Load dates from a file of sequential dates. Load this from `valid_on.txt` or `changes.txt`
 ///
 /// **If file could not be loaded for any reason**, will print the error, and only return an empty vec

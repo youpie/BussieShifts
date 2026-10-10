@@ -65,7 +65,7 @@ impl PdfTimetableCollection {
             .iter_mut()
             .find(|item| item.start_date == start_date)
         {
-            info!("Extending existing collection {:?}", &start_date);
+            debug!("Extending existing collection {:?}", &start_date);
             existing_collection
                 .files
                 .insert(file_id, pdf_path.to_string_lossy().to_string());
