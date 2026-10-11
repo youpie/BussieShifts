@@ -7,7 +7,6 @@ use time::{Date, OffsetDateTime, Time, Weekday};
 use crate::{
     ShiftQuery, TTBOptions,
     collection::PdfTimetableCollection,
-    deadhead::{DeadheadCollection, DeadheadLocations},
     get_valid_timetables,
     parsing::shift_structs::{JobDrivingType, JobType, Shift, ShiftJob, ShiftValidDay},
     return_error,
@@ -33,14 +32,11 @@ pub struct OmloopDayIndex {
 
 impl OmloopDayIndex {
     /// Will also save omloops and Self to disk
-    pub fn new_omloop_timetable(
-        timetable: &PdfTimetableCollection,
-        deadhead_locations: &DeadheadLocations,
-    ) -> Result<Self> {
+    pub fn new_for_timetable(timetable: &PdfTimetableCollection) -> Result<Self> {
         debug!("Indexing omlopen for timetable {}", timetable.base_start());
         let mut omlopen_map = HashMap::new();
         for shift in &timetable.shifts {
-            BusOmloopDay::new_or_extend(&mut omlopen_map, shift.1);
+            OmloopCollection::new_or_extend(&mut omlopen_map, shift.1);
         }
 
         // create the valid days index map
@@ -86,16 +82,16 @@ impl OmloopDayIndex {
         };
 
         index_map.save(timetable)?;
-        DeadheadCollection::for_every_weekday(deadhead_locations, timetable)?;
         Ok(index_map)
     }
 
     fn save(&self, timetable: &PdfTimetableCollection) -> Result<()> {
-        _ = std::fs::create_dir_all(BusOmloopDay::get_base_path(timetable.base_start()));
+        _ = std::fs::create_dir_all(OmloopCollection::get_base_path(timetable.base_start()));
         let path = Self::path(timetable, false);
-        fs::write(path, serde_json::to_string_pretty(self)?).note("Failed to save OmloopIndex")?;
+        fs::write(path, serde_json::to_string_pretty(self)?)
+            .note("Failed to save OmloopIndex JSON")?;
         let path = Self::path(timetable, true);
-        fs::write(path, postcard::to_allocvec(self)?)?;
+        fs::write(path, postcard::to_allocvec(self)?).note("Failed to save OmloopIndex BIN")?;
         Ok(())
     }
 
@@ -109,7 +105,7 @@ impl OmloopDayIndex {
     }
 
     fn path(timetable: &PdfTimetableCollection, binary: bool) -> PathBuf {
-        let mut path = BusOmloopDay::get_path(0, timetable.base_start(), 0);
+        let mut path = OmloopCollection::get_path(0, timetable.base_start(), 0);
         path.set_file_name("index");
         path.set_extension(match binary {
             true => "bin",
@@ -122,20 +118,19 @@ impl OmloopDayIndex {
         omloop: usize,
         day_of_week: Weekday,
         timetable: &PdfTimetableCollection,
-    ) -> Result<BusOmloopDay> {
+    ) -> Result<OmloopCollection> {
         let index_map = Self::load(&timetable)?;
         let indexes = index_map
             .day_indexes
             .get(&omloop)
             .and_then(|v| v.get(&(day_of_week as u8)))
-            .result_reason("No omloop report found for that day")?
-            .clone();
+            .result_reason("No omloop report found for that day")?;
 
-        let multiple_omlopen: Vec<_> = indexes
+        let multiple_omlopen: Vec<OmloopCollection> = indexes
             .iter()
-            .filter_map(|ix| BusOmloopDay::load(omloop, index_map.timetable_date, *ix).ok())
+            .filter_map(|ix| OmloopCollection::load(omloop, index_map.timetable_date, *ix).ok())
             .collect();
-        let combined = BusOmloopDay::combine_multiple(multiple_omlopen);
+        let combined = OmloopCollection::combine_multiple(multiple_omlopen);
 
         Ok(combined)
     }
@@ -181,12 +176,12 @@ impl ShiftJobExtended {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct BusOmloopDay {
+pub struct OmloopCollection {
     pub omloop: usize,
     jobs: Vec<ShiftJobExtended>,
 }
 
-impl BusOmloopDay {
+impl OmloopCollection {
     pub(self) fn new_or_extend(
         omlopen: &mut HashMap<(Omloop, Vec<ShiftValidDay>), Self>,
         shift: &Shift,
@@ -224,7 +219,7 @@ impl BusOmloopDay {
     }
 
     pub(self) fn combine_multiple(omlopen: Vec<Self>) -> Self {
-        let mut combined = BusOmloopDay::default();
+        let mut combined = OmloopCollection::default();
         for mut omloop in omlopen {
             combined.omloop = omloop.omloop;
             combined.jobs.append(&mut omloop.jobs);
@@ -268,7 +263,7 @@ impl BusOmloopDay {
     }
 }
 
-impl<'a> OmloopCollectionIO for BusOmloopDay {
+impl<'a> OmloopCollectionIO for OmloopCollection {
     const PATH: &str = "omlopen";
     type IndexType = u8;
 }
@@ -286,7 +281,7 @@ pub trait OmloopCollectionIO: Serialize {
     fn save(&self, omloop: Omloop, start_date: Date, index: Self::IndexType) -> Result<()> {
         let mut path = Self::get_path(omloop, start_date, index);
         _ = std::fs::create_dir_all(Self::get_base_path(start_date));
-        fs::write(&path, serde_json::to_string_pretty(self)?)?;
+        // fs::write(&path, serde_json::to_string_pretty(self)?)?;
         path.set_extension("bin");
         fs::write(&path, postcard::to_allocvec(&self)?)?;
         Ok(())

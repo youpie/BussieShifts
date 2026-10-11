@@ -1,5 +1,5 @@
 use crate::collection::{PdfTimetableCollection, ShiftData};
-use crate::deadhead::DeadheadLocations;
+use crate::deadhead::{DeadheadCollection, DeadheadLocations};
 use crate::omloop::{OmloopDayIndex, get_omloop, get_omloop_overview};
 use crate::parsing::shift_structs::Shift;
 use crate::parsing::valid_on;
@@ -37,7 +37,6 @@ type NextTimetableChangeDate = Option<Date>;
 
 const COLLECTION_PATH: &str = "pdf_collection";
 const SHIFT_PATH: &str = "shifts";
-const OMLOOP_PATH: &str = "omlopen";
 
 const BOOKS_PATH: &str = "Dienstboek";
 
@@ -131,11 +130,12 @@ fn load_pdfs_and_index() -> Result<()> {
         PdfTimetableCollection::combine_from_changes_files(timetable_collections, changes_files);
     PdfTimetableCollection::save(&timetable_collections)?;
 
-    let deadhead_locations = DeadheadLocations::load().note("Failed to load deadhead file")?;
+    let deadhead_locations = DeadheadLocations::load()?;
     deadhead_locations.debug_locations();
 
     for timetable in &timetable_collections {
-        OmloopDayIndex::new_omloop_timetable(timetable, &deadhead_locations).unwrap();
+        OmloopDayIndex::new_for_timetable(timetable)?;
+        DeadheadCollection::new_for_timetable(&deadhead_locations, timetable)?;
     }
 
     PdfTimetableCollection::load_to_global()?;
