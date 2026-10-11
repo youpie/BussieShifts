@@ -4,4 +4,4 @@ pub use color_eyre::eyre::{Context, Result, WrapErr, eyre};
 pub use serde::{Deserialize, Serialize};
 pub use tracing::{debug, error, info, span, trace, warn};
 
-pub(crate) use crate::{COLLECTION_PATH, DATE_FORMAT, SHIFT_PATH, omloop::Omloop};
+pub(crate) use crate::{COLLECTION_PATH, DATE_FORMAT, SHIFT_PATH, ShiftQuery, return_error};

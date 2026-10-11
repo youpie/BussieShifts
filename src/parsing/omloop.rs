@@ -4,15 +4,8 @@ use actix_web::{HttpResponse, Responder, get, http::header::ContentType, web};
 use serde::{Deserialize, Serialize};
 use time::{Date, OffsetDateTime, Time, Weekday};
 
-use crate::{
-    ShiftQuery, TTBOptions,
-    collection::PdfTimetableCollection,
-    get_valid_timetables,
-    parsing::shift_structs::{JobDrivingType, JobType, Shift, ShiftJob, ShiftValidDay},
-    return_error,
-};
-
-use crate::prelude::*;
+use super::*;
+use crate::{TTBOptions, get_valid_timetables, prelude::*};
 
 pub type Omloop = usize;
 type Index = u8;

@@ -1,5 +1,3 @@
-use crate::collection::ShiftData;
-use crate::parsing::shift_structs::*;
 use float_ord::FloatOrd;
 use lopdf::Document;
 use regex::Regex;
@@ -9,6 +7,7 @@ use std::path::PathBuf;
 use time::{Date, Time};
 
 use super::*;
+use crate::prelude::*;
 
 pub fn parse_pdf(pdf_path: &PathBuf, shift_data: HashMap<String, ShiftData>) -> Result<Vec<Shift>> {
     let doc = Document::load(pdf_path)?;

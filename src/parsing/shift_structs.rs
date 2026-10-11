@@ -3,9 +3,8 @@ use std::{fs, io, path::PathBuf};
 use thiserror::Error;
 use time::{Date, Time};
 
-use crate::collection::PdfTimetableCollection;
-
 use super::*;
+use crate::prelude::*;
 
 #[derive(Error, Debug, Serialize, Deserialize, Clone)]
 pub enum ShiftParseError {

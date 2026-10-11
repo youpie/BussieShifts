@@ -22,15 +22,8 @@ use actix_web::{HttpResponse, get, http::header::ContentType, web};
 use time::{Time, Weekday};
 use tracing::info_span;
 
-use crate::{
-    collection::PdfTimetableCollection,
-    omloop::{
-        OmloopCollection, OmloopCollectionIO, OmloopDayIndex, ShiftJobExtended,
-        get_dow_and_timetable,
-    },
-    prelude::*,
-    return_error,
-};
+use super::*;
+use crate::prelude::*;
 
 type GeneralLocation = String;
 type SpecificLocation = String;

@@ -4,12 +4,9 @@ use std::path::PathBuf;
 use time::Date;
 use walkdir::WalkDir;
 
-use crate::{
-    collection::PdfTimetableCollection, get_valid_timetables, index::get_valid_shifts,
-    parsing::shift_structs::Shift, return_error,
-};
-
+use crate::index::get_valid_shifts;
 use crate::{TTBOptions, prelude::*};
+use crate::{get_valid_timetables, parsing::*};
 
 #[derive(Serialize, Deserialize)]
 pub struct Statistics {

@@ -1,34 +1,22 @@
-use crate::collection::{PdfTimetableCollection, ShiftData};
-use crate::deadhead::{DeadheadCollection, DeadheadLocations};
-use crate::omloop::{OmloopDayIndex, get_omloop, get_omloop_overview};
-use crate::parsing::shift_structs::Shift;
-use crate::parsing::valid_on;
 use crate::statistics::handle_stats_request;
 use actix_web::http::header::ContentType;
 use actix_web::{App, HttpResponse, HttpServer, Responder, get, web};
 use color_eyre::eyre;
 use index::handle_index_request;
 use qpdf::QPdf;
-use std::ffi::OsStr;
 use std::fs::{self};
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::path::{Component, PathBuf};
-use std::time::SystemTime;
 use time::format_description::BorrowedFormatItem;
 use time::macros::format_description;
 use time::{Date, OffsetDateTime};
-use walkdir::WalkDir;
 
+use crate::parsing::*;
 pub use crate::prelude::*;
 
 pub mod prelude;
-
-mod collection;
-mod deadhead;
 #[macro_use]
 mod error;
 mod index;
-mod omloop;
 mod parsing;
 mod statistics;
 
@@ -47,99 +35,6 @@ const DATE_FORMAT: &[BorrowedFormatItem<'_>] = format_description!["[day]-[month
 #[derive(Deserialize)]
 struct ShiftQuery {
     date: Option<String>, // Optional date query parameter
-}
-
-#[derive(Hash, Debug)]
-struct TimetablePaths {
-    pub timetable_pdfs: Vec<PathBuf>,
-    pub valid_from_files: Vec<PathBuf>,
-    pub changes_files: Vec<PathBuf>,
-}
-
-fn get_timetable_pdf_files() -> Result<TimetablePaths> {
-    let mut timetable_pdfs = Vec::new();
-    let mut updated_timetable_pdfs = Vec::new();
-    let mut valid_from_files = Vec::new();
-    let mut changes_files = Vec::new();
-    for entry in WalkDir::new(BOOKS_PATH).into_iter().filter_map(Result::ok) {
-        let path = entry.path();
-        if path
-            .components()
-            .find(|components| *components == Component::Normal(OsStr::new(CHANGE_FOLDER_NAME)))
-            .is_some()
-        {
-            debug!("Found {path:?}");
-            if path.is_file() {
-                updated_timetable_pdfs.push(path.to_path_buf());
-            }
-        } else if path.file_name() == Some(OsStr::new("valid_from.txt")) {
-            valid_from_files.push(path.to_path_buf());
-        } else if path.file_name() == Some(OsStr::new("changes.txt")) {
-            changes_files.push(path.to_path_buf());
-        } else if path.is_file() && path.extension() == Some(OsStr::new("pdf")) {
-            // Skip directories
-            timetable_pdfs.push(path.to_path_buf());
-        } else if path.is_file() {
-            info!("Ignoring file {path:?} (probably missing .pdf)");
-        }
-    }
-    updated_timetable_pdfs
-        .sort_by_key(|element| get_creation_date(element).unwrap_or(SystemTime::now()));
-    debug!("Changed sheets: {updated_timetable_pdfs:#?}");
-    timetable_pdfs.extend(updated_timetable_pdfs);
-    Ok(TimetablePaths {
-        timetable_pdfs,
-        valid_from_files,
-        changes_files,
-    })
-}
-
-fn get_creation_date(path: &PathBuf) -> Result<SystemTime> {
-    Ok(fs::metadata(path)?.created()?)
-}
-
-fn load_pdfs_and_index() -> Result<()> {
-    let files = get_timetable_pdf_files()?;
-    match fs::create_dir(COLLECTION_PATH) {
-        Ok(_) => (),
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
-        Err(e) => return Err(e.into()),
-    };
-    fs::remove_dir_all(COLLECTION_PATH)?;
-
-    let changes_files: Vec<Vec<Date>> = files
-        .changes_files
-        .iter()
-        .map(|v| valid_on::parse_dates_from_file(v))
-        .collect();
-
-    let mut timetable_collections = Vec::new();
-    for file_path in files.timetable_pdfs.iter().enumerate() {
-        let collection = PdfTimetableCollection::new_or_extend(
-            &mut timetable_collections,
-            file_path.1.into(),
-            file_path.0,
-        )?;
-        if let Some(collection) = collection {
-            timetable_collections.push(collection);
-        }
-    }
-    timetable_collections =
-        PdfTimetableCollection::add_valid_from_data(timetable_collections, files.valid_from_files);
-    timetable_collections =
-        PdfTimetableCollection::combine_from_changes_files(timetable_collections, changes_files);
-    PdfTimetableCollection::save(&timetable_collections)?;
-
-    let deadhead_locations = DeadheadLocations::load()?;
-    deadhead_locations.debug_locations();
-
-    for timetable in &timetable_collections {
-        OmloopDayIndex::new_for_timetable(timetable)?;
-        DeadheadCollection::new_for_timetable(&deadhead_locations, timetable)?;
-    }
-
-    PdfTimetableCollection::load_to_global()?;
-    Ok(())
 }
 
 #[derive(PartialEq)]
@@ -235,7 +130,7 @@ fn find_shift(
 }
 
 fn handle_refresh_request() -> HttpResponse {
-    match load_pdfs_and_index() {
+    match parsing::parse_dienstboekjes() {
         Ok(_) => HttpResponse::Accepted().body("Shifts sucessfully indexed"),
         Err(_err) => HttpResponse::InternalServerError().body(format!(
             "Shifts could not be indexed. Check logs for more details"
@@ -358,7 +253,7 @@ async fn main() -> std::io::Result<()> {
     info!("Indexing trip sheets");
     // Get the hash of all files in the folder. If anything changes, the hash changes and so it will reindex
     let mut s = DefaultHasher::new();
-    let files = get_timetable_pdf_files().expect("Failed to get timetable files");
+    let files = TimetablePaths::get().expect("Failed to get timetable files");
     files.hash(&mut s);
     let current_hash = s.finish();
     let _previous_hash_option = fs::read("pdf_hash")
@@ -369,23 +264,23 @@ async fn main() -> std::io::Result<()> {
         if let Some(previous_hash) = _previous_hash_option {
             if previous_hash != current_hash {
                 warn!("Hash is changed, reindexing files");
-                load_pdfs_and_index().unwrap();
+                parsing::parse_dienstboekjes().unwrap();
             } else {
                 info!("Hash is the same, so wont reindex");
                 if let Err(e) = PdfTimetableCollection::load_to_global() {
                     warn!("Loading the timetables has failed with errror {e:#?}. Will Reindex");
-                    load_pdfs_and_index().unwrap();
+                    parsing::parse_dienstboekjes().unwrap();
                 }
             }
         } else {
             error!("Could not find previous hash, reindexing");
-            load_pdfs_and_index().unwrap();
+            parsing::parse_dienstboekjes().unwrap();
             PdfTimetableCollection::load_to_global().unwrap();
         }
     }
     #[cfg(debug_assertions)]
     {
-        load_pdfs_and_index().unwrap();
+        parsing::parse_dienstboekjes().unwrap();
     }
     let _ = fs::write("pdf_hash", current_hash.to_le_bytes());
 
@@ -394,8 +289,8 @@ async fn main() -> std::io::Result<()> {
             .service(get_shift)
             .service(get_omloop_overview)
             .service(get_omloop)
-            .service(deadhead::get_deadheads)
-            .service(deadhead::get_locations)
+            .service(get_deadheads)
+            .service(get_locations)
     })
     .bind("0.0.0.0:8080")?
     .run()

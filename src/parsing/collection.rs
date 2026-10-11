@@ -10,8 +10,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use time::Date;
 
-use crate::parsing::{shift_parsing::parse_pdf, shift_structs::Shift, valid_on};
-
+use super::*;
 use crate::prelude::*;
 
 static ALL_TIMETABLE_COLLECTIONS: LazyLock<RwLock<Vec<PdfTimetableCollection>>> =
