@@ -468,14 +468,24 @@ fn message_type_finder(lijn_string: String) -> Option<JobMessageType> {
             bustype: lijn_string,
         },
         "pass" => {
-            let lijn_string_split = lijn_string.replace("Pass met ", "");
+            let lijn_string_split = lijn_string
+                .replace("Pass met ", "")
+                .replace("pass met ", "");
             let mut dienst_omloop_split = lijn_string_split.split_whitespace().next()?.split('/');
             JobMessageType::Passagieren {
                 dienstnummer: dienst_omloop_split.next()?.parse().ok()?,
                 omloop: dienst_omloop_split.next()?.to_string(),
             }
         }
-        "meenemen" => JobMessageType::Other(lijn_string),
+        "meenemen" => JobMessageType::Meenemen {
+            //TODO make this actual logic
+            dienstnummers: lijn_string,
+        },
+        "minimaal" => {
+            let text_numbers: String = lijn_string.chars().filter(|c| c.is_ascii_digit()).collect();
+            let number: u8 = text_numbers.parse().unwrap_or_default();
+            JobMessageType::Soc { charge: number }
+        }
         _ => JobMessageType::Other(lijn_string),
     };
     Some(message)

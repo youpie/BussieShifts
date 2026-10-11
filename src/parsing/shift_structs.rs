@@ -72,10 +72,11 @@ pub enum JobDrivingType {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum JobMessageType {
-    Meenemen { dienstnummers: Vec<u32> },
+    Meenemen { dienstnummers: String },
     Passagieren { dienstnummer: u32, omloop: String },
     BusOp { lijn: u32 },
     NeemBus { bustype: String },
+    Soc { charge: u8 },
     Other(String),
 }
 
