@@ -1,4 +1,9 @@
+use crate::parsing::shift::Shift;
+use crate::parsing::timetable::{ShiftEntry, TTBOptions, TimetableCollection};
+use crate::parsing::timetable_paths::TimetablePaths;
+use crate::parsing::{deadhead::*, omloop::*};
 use crate::statistics::handle_stats_request;
+
 use actix_web::http::header::ContentType;
 use actix_web::{App, HttpResponse, HttpServer, Responder, get, web};
 use color_eyre::eyre;
@@ -10,7 +15,6 @@ use time::Date;
 use time::format_description::BorrowedFormatItem;
 use time::macros::format_description;
 
-use crate::parsing::*;
 pub use crate::prelude::*;
 
 pub mod prelude;
@@ -64,7 +68,7 @@ async fn get_shift(request: web::Path<String>, query: web::Query<ShiftQuery>) ->
 
     let add_upcoming_timetables =
         TTBOptions::from_bool(custom_date_option.is_some(), TTBOptions::AppendFuture);
-    let mut valid_timetables = match PdfTimetableCollection::get_valid_timetables(
+    let mut valid_timetables = match TimetableCollection::get_valid_timetables(
         custom_date_option,
         add_upcoming_timetables,
     ) {
@@ -80,7 +84,7 @@ async fn get_shift(request: web::Path<String>, query: web::Query<ShiftQuery>) ->
     let numeric_shift_number: String = shift.chars().filter(|c| c.is_numeric()).collect();
 
     let (shift_collection, shift_data) =
-        match ShiftData::find_shift(&numeric_shift_number, &mut valid_timetables) {
+        match ShiftEntry::find_shift(&numeric_shift_number, &mut valid_timetables) {
             Some(shift) => shift,
             None => {
                 return HttpResponse::NotFound()
@@ -129,8 +133,8 @@ fn return_error(error: eyre::Report) -> HttpResponse {
 }
 
 fn find_pdf_shift(
-    shift_timetable_collection: &PdfTimetableCollection,
-    shift_data: ShiftData,
+    shift_timetable_collection: &TimetableCollection,
+    shift_data: ShiftEntry,
 ) -> Result<Vec<u8>> {
     // Get the path of the pdf by getting the file id of the shift data, and using that to find the filename
     let shift_pdf_path = shift_timetable_collection
@@ -174,7 +178,7 @@ async fn main() -> std::io::Result<()> {
                 parsing::parse_dienstboekjes().unwrap();
             } else {
                 info!("Hash is the same, so wont reindex");
-                if let Err(e) = PdfTimetableCollection::load_to_global() {
+                if let Err(e) = TimetableCollection::load_to_global() {
                     warn!("Loading the timetables has failed with errror {e:#?}. Will Reindex");
                     parsing::parse_dienstboekjes().unwrap();
                 }
@@ -182,7 +186,7 @@ async fn main() -> std::io::Result<()> {
         } else {
             error!("Could not find previous hash, reindexing");
             parsing::parse_dienstboekjes().unwrap();
-            PdfTimetableCollection::load_to_global().unwrap();
+            TimetableCollection::load_to_global().unwrap();
         }
     }
     #[cfg(debug_assertions)]

@@ -5,7 +5,7 @@ use time::Date;
 use walkdir::WalkDir;
 
 use crate::index::IndexShift;
-use crate::parsing::*;
+use crate::parsing::{shift::Shift, timetable::*};
 use crate::prelude::*;
 
 #[derive(Serialize, Deserialize)]
@@ -24,14 +24,13 @@ pub struct Statistics {
 
 impl Statistics {
     fn create(date: Option<Date>) -> Result<Self> {
-        let active_timetables =
-            PdfTimetableCollection::get_valid_timetables(date, TTBOptions::None)?;
+        let active_timetables = TimetableCollection::get_valid_timetables(date, TTBOptions::None)?;
         debug!("Set date {date:?}");
         for ttb in &active_timetables.0 {
             debug!("{}", ttb.start_date);
         }
 
-        let timetables = PdfTimetableCollection::get_global()?;
+        let timetables = TimetableCollection::get_global()?;
         let active_shifts = active_timetables
             .0
             .iter()

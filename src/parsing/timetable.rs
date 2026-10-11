@@ -13,10 +13,10 @@ use time::{Date, OffsetDateTime};
 use super::*;
 use crate::prelude::*;
 
-static ALL_TIMETABLE_COLLECTIONS: LazyLock<RwLock<Vec<PdfTimetableCollection>>> =
+static ALL_TIMETABLE_COLLECTIONS: LazyLock<RwLock<Vec<TimetableCollection>>> =
     LazyLock::new(|| RwLock::new(vec![]));
 
-pub type ValidTimetables = Vec<PdfTimetableCollection>;
+pub type ValidTimetables = Vec<TimetableCollection>;
 pub type NextTimetableChangeDate = Option<Date>;
 
 #[derive(PartialEq)]
@@ -36,22 +36,22 @@ impl TTBOptions {
 }
 
 struct ChangesCollection {
-    timetable: PdfTimetableCollection,
+    timetable: TimetableCollection,
     base_start_date: Date,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct PdfTimetableCollection {
+pub struct TimetableCollection {
     pub start_date: Date,
     valid_from: Vec<Date>,
     pub files: HashMap<usize, String>,
-    pub pages: HashMap<String, ShiftData>,
+    pub pages: HashMap<String, ShiftEntry>,
     #[serde(skip)]
     /// Will be skipped during deserialization
     pub shifts: HashMap<String, Shift>,
 }
 
-impl PdfTimetableCollection {
+impl TimetableCollection {
     // Load every PDF and group them
     pub fn new_or_extend(
         existing_timetables: &mut Vec<Self>,
@@ -59,7 +59,7 @@ impl PdfTimetableCollection {
         file_id: usize,
     ) -> Result<Option<Self>> {
         // Load the PDF document.
-        let shift_data_map = ShiftData::new_from_pdf(&pdf_path, file_id)?;
+        let shift_data_map = ShiftEntry::new_from_pdf(&pdf_path, file_id)?;
         let parsed_shifts = shift_parsing::parse_pdf(&pdf_path, shift_data_map.clone())?;
 
         let start_date = parsed_shifts
@@ -86,7 +86,7 @@ impl PdfTimetableCollection {
             Ok(None)
         } else {
             info!("Writing new collection {:?}", &start_date);
-            Ok(Some(PdfTimetableCollection {
+            Ok(Some(TimetableCollection {
                 valid_from: vec![start_date.clone()],
                 start_date,
                 files: HashMap::from([(file_id, pdf_path.to_string_lossy().to_string())]),
@@ -223,7 +223,7 @@ impl PdfTimetableCollection {
             if file.file_type()?.is_dir() {
                 continue;
             }
-            let collection_file: PdfTimetableCollection =
+            let collection_file: TimetableCollection =
                 serde_json::from_slice(&fs::read(file.path())?)?;
 
             for valid_date in &collection_file.valid_from {
@@ -261,13 +261,13 @@ impl PdfTimetableCollection {
         date: Option<Date>,
         options: TTBOptions,
     ) -> Result<(ValidTimetables, NextTimetableChangeDate)> {
-        let collections = PdfTimetableCollection::get_global()?;
+        let collections = TimetableCollection::get_global()?;
         let current_date = match date {
             Some(date) => date,
             None => OffsetDateTime::now_utc().date(),
         };
-        let mut upcoming_timetables: Vec<PdfTimetableCollection> = vec![];
-        let mut current_timetables: Vec<PdfTimetableCollection> = vec![];
+        let mut upcoming_timetables: Vec<TimetableCollection> = vec![];
+        let mut current_timetables: Vec<TimetableCollection> = vec![];
         // Loop over all files in the collection folder
         for timetable_collection in collections {
             //if the current collection date is higher than the last but lower than the system date. Make this the most recent one
@@ -306,22 +306,19 @@ impl PdfTimetableCollection {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct ShiftData {
+pub struct ShiftEntry {
     pub pages: Vec<u32>,
     pub file_id: usize,
     pub shift_prefix: String,
 }
 
-impl ShiftData {
-    pub(self) fn new_from_pdf(
-        path: &PathBuf,
-        file_id: usize,
-    ) -> Result<HashMap<String, ShiftData>> {
+impl ShiftEntry {
+    pub(self) fn new_from_pdf(path: &PathBuf, file_id: usize) -> Result<HashMap<String, Self>> {
         let doc = Document::load(&path)?;
 
         // Define a regex pattern that finds "Dienst" followed by a trip number.
         let re = Regex::new(r"Dienst\s*(\b[A-Z]{1,2} \d{4}\b)")?;
-        let mut index: HashMap<String, ShiftData> = HashMap::new();
+        let mut index: HashMap<String, ShiftEntry> = HashMap::new();
 
         // Iterate over all pages in the PDF.
         // `get_pages` returns a map of page numbers to their internal object IDs.
@@ -359,8 +356,8 @@ impl ShiftData {
     // Recursive function to find a valid shift
     pub fn find_shift(
         shift_number: &str,
-        valid_timetables: &mut Vec<PdfTimetableCollection>,
-    ) -> Option<(PdfTimetableCollection, Self)> {
+        valid_timetables: &mut Vec<TimetableCollection>,
+    ) -> Option<(TimetableCollection, Self)> {
         let current_timetable = match valid_timetables.pop() {
             Some(timetable) => timetable,
             None => return None, // If there are no more valid timetables while this check runs, the shift is not available

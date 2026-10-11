@@ -201,7 +201,7 @@ impl<'a> DeadheadCollection<'a> {
     pub fn load_bytes(
         weekday: Weekday,
         location: &'a str,
-        timetable: &PdfTimetableCollection,
+        timetable: &TimetableCollection,
     ) -> Result<Vec<u8>> {
         let mut path = Self::get_path(weekday as usize, timetable.base_start(), location);
         path.set_extension("bin");
@@ -216,7 +216,7 @@ impl<'a> DeadheadCollection<'a> {
 
     pub fn new_for_timetable(
         deadhead_locations: &DeadheadLocations,
-        timetable: &PdfTimetableCollection,
+        timetable: &TimetableCollection,
     ) -> Result<()> {
         let mut omlopen_per_day = Vec::new();
         for day in Weekday::get_all() {

@@ -25,7 +25,7 @@ pub struct OmloopDayIndex {
 
 impl OmloopDayIndex {
     /// Will also save omloops and Self to disk
-    pub fn new_for_timetable(timetable: &PdfTimetableCollection) -> Result<Self> {
+    pub fn new_for_timetable(timetable: &TimetableCollection) -> Result<Self> {
         debug!("Indexing omlopen for timetable {}", timetable.base_start());
         let mut omlopen_map = HashMap::new();
         for shift in &timetable.shifts {
@@ -78,7 +78,7 @@ impl OmloopDayIndex {
         Ok(index_map)
     }
 
-    fn save(&self, timetable: &PdfTimetableCollection) -> Result<()> {
+    fn save(&self, timetable: &TimetableCollection) -> Result<()> {
         _ = std::fs::create_dir_all(OmloopCollection::get_base_path(timetable.base_start()));
         let path = Self::path(timetable, false);
         fs::write(path, serde_json::to_string_pretty(self)?)
@@ -88,7 +88,7 @@ impl OmloopDayIndex {
         Ok(())
     }
 
-    fn load(timetable: &PdfTimetableCollection) -> Result<Self> {
+    fn load(timetable: &TimetableCollection) -> Result<Self> {
         let path = Self::path(timetable, true);
         debug!("Trying to load timetable {path:?}");
         Ok(postcard::from_bytes(
@@ -97,7 +97,7 @@ impl OmloopDayIndex {
         .note("Failed to parse OmloopIndex")?)
     }
 
-    fn path(timetable: &PdfTimetableCollection, binary: bool) -> PathBuf {
+    fn path(timetable: &TimetableCollection, binary: bool) -> PathBuf {
         let mut path = OmloopCollection::get_path(0, timetable.base_start(), 0);
         path.set_file_name("index");
         path.set_extension(match binary {
@@ -110,7 +110,7 @@ impl OmloopDayIndex {
     pub fn get_omloop(
         omloop: usize,
         day_of_week: Weekday,
-        timetable: &PdfTimetableCollection,
+        timetable: &TimetableCollection,
     ) -> Result<OmloopCollection> {
         let index_map = Self::load(&timetable)?;
         let indexes = index_map
@@ -128,7 +128,7 @@ impl OmloopDayIndex {
         Ok(combined)
     }
 
-    pub fn get_all_omloop(day: Weekday, timetable: &PdfTimetableCollection) -> Result<Vec<Omloop>> {
+    pub fn get_all_omloop(day: Weekday, timetable: &TimetableCollection) -> Result<Vec<Omloop>> {
         let date_index = Self::load(timetable)?;
         let omlopen = date_index
             .day_indexes
@@ -340,7 +340,7 @@ pub async fn get_omloop_overview(query: web::Query<ShiftQuery>) -> HttpResponse 
 
 pub fn get_weekday_and_timetable(
     date_string: Option<&str>,
-) -> Result<(Weekday, PdfTimetableCollection), HttpResponse> {
+) -> Result<(Weekday, TimetableCollection), HttpResponse> {
     let date = date_string
         .and_then(|date_string| {
             Date::parse(date_string, DATE_FORMAT)
@@ -352,7 +352,7 @@ pub fn get_weekday_and_timetable(
     let day_of_the_week = date.weekday();
 
     let timetable =
-        match PdfTimetableCollection::get_valid_timetables(Some(date), TTBOptions::OnlyFirst) {
+        match TimetableCollection::get_valid_timetables(Some(date), TTBOptions::OnlyFirst) {
             Ok(v) if let Some(first_timetable) = v.0.last().cloned() => first_timetable,
             _ => return Err(return_error(eyre!("Could not get timetable"))),
         };

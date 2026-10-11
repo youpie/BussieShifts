@@ -4,7 +4,7 @@ use actix_web::{HttpResponse, http::header::ContentType};
 use serde::Serialize;
 use time::Date;
 
-use crate::parsing::*;
+use crate::parsing::timetable::*;
 use crate::prelude::*;
 
 #[derive(Serialize)]
@@ -17,7 +17,7 @@ impl IndexShift {
     pub fn get_valid_shifts(date: Option<Date>) -> Result<Vec<Self>> {
         let mut available_shifts: HashMap<String, (Date, String)> = HashMap::new();
         let only_first = TTBOptions::from_bool(date.is_some(), TTBOptions::None);
-        let valid_timetables = PdfTimetableCollection::get_valid_timetables(date, only_first)?.0;
+        let valid_timetables = TimetableCollection::get_valid_timetables(date, only_first)?.0;
         for current_timetable in valid_timetables {
             for shift in current_timetable.pages {
                 available_shifts.insert(

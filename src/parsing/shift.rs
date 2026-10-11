@@ -176,13 +176,13 @@ pub struct Shift {
 }
 
 impl Shift {
-    pub fn _load(timetable: &PdfTimetableCollection, id: &str) -> Result<Self> {
+    pub fn _load(timetable: &TimetableCollection, id: &str) -> Result<Self> {
         Ok(serde_json::from_str::<Self>(&Self::load_json(
             timetable, id,
         )?)?)
     }
 
-    pub fn load_json(timetable: &PdfTimetableCollection, id: &str) -> Result<String> {
+    pub fn load_json(timetable: &TimetableCollection, id: &str) -> Result<String> {
         let base_path = timetable.base_start().format(DATE_FORMAT)?;
         let path = PathBuf::from(format!(
             "{COLLECTION_PATH}/{base_path}/{SHIFT_PATH}/{id}.json"

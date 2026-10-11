@@ -9,7 +9,10 @@ use time::{Date, Time};
 use super::*;
 use crate::prelude::*;
 
-pub fn parse_pdf(pdf_path: &PathBuf, shift_data: HashMap<String, ShiftData>) -> Result<Vec<Shift>> {
+pub fn parse_pdf(
+    pdf_path: &PathBuf,
+    shift_data: HashMap<String, ShiftEntry>,
+) -> Result<Vec<Shift>> {
     let doc = Document::load(pdf_path)?;
     let pages = doc.get_pages();
     let pagenr_hashmap = reverse_pagenr_hashmap(shift_data);
@@ -48,7 +51,7 @@ pub fn parse_pdf(pdf_path: &PathBuf, shift_data: HashMap<String, ShiftData>) -> 
     Ok(shifts)
 }
 
-fn reverse_pagenr_hashmap(hashmap: HashMap<String, ShiftData>) -> HashMap<u32, String> {
+fn reverse_pagenr_hashmap(hashmap: HashMap<String, ShiftEntry>) -> HashMap<u32, String> {
     let mut new_hashmap: HashMap<u32, String> = HashMap::new();
     for item in hashmap.into_iter() {
         item.1.pages.iter().for_each(|p| {

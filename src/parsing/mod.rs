@@ -1,19 +1,19 @@
-mod collection;
-mod deadhead;
-mod omloop;
-mod shift_parsing;
-mod shift_structs;
-mod timetable_paths;
-mod valid_on;
+pub(super) mod deadhead;
+pub(super) mod omloop;
+pub(super) mod shift;
+pub(super) mod shift_parsing;
+pub(super) mod timetable;
+pub(super) mod timetable_paths;
+pub(super) mod valid_on;
 
 use std::fs;
 
-pub use collection::*;
-pub use deadhead::*;
-pub use omloop::*;
-pub use shift_parsing::*;
-pub use shift_structs::*;
-pub use timetable_paths::*;
+pub(self) use deadhead::*;
+pub(self) use omloop::*;
+pub(self) use shift::*;
+pub(self) use shift_parsing::*;
+pub(self) use timetable::*;
+pub(self) use timetable_paths::*;
 
 use crate::prelude::*;
 use time::Date;
@@ -35,7 +35,7 @@ pub fn parse_dienstboekjes() -> Result<()> {
 
     let mut timetable_collections = Vec::new();
     for file_path in files.timetable_pdfs.iter().enumerate() {
-        let collection = PdfTimetableCollection::new_or_extend(
+        let collection = TimetableCollection::new_or_extend(
             &mut timetable_collections,
             file_path.1.into(),
             file_path.0,
@@ -45,10 +45,10 @@ pub fn parse_dienstboekjes() -> Result<()> {
         }
     }
     timetable_collections =
-        PdfTimetableCollection::add_valid_from_data(timetable_collections, files.valid_from_files);
+        TimetableCollection::add_valid_from_data(timetable_collections, files.valid_from_files);
     timetable_collections =
-        PdfTimetableCollection::combine_from_changes_files(timetable_collections, changes_files);
-    PdfTimetableCollection::save(&timetable_collections)?;
+        TimetableCollection::combine_from_changes_files(timetable_collections, changes_files);
+    TimetableCollection::save(&timetable_collections)?;
 
     let deadhead_locations = DeadheadLocations::load()?;
     deadhead_locations.debug_locations();
@@ -58,6 +58,6 @@ pub fn parse_dienstboekjes() -> Result<()> {
         DeadheadCollection::new_for_timetable(&deadhead_locations, timetable)?;
     }
 
-    PdfTimetableCollection::load_to_global()?;
+    TimetableCollection::load_to_global()?;
     Ok(())
 }
