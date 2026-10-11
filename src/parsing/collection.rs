@@ -8,7 +8,7 @@ use std::{
 use lopdf::Document;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use time::Date;
+use time::{Date, OffsetDateTime};
 
 use super::*;
 use crate::prelude::*;
@@ -16,11 +16,23 @@ use crate::prelude::*;
 static ALL_TIMETABLE_COLLECTIONS: LazyLock<RwLock<Vec<PdfTimetableCollection>>> =
     LazyLock::new(|| RwLock::new(vec![]));
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct ShiftData {
-    pub pages: Vec<u32>,
-    pub file_id: usize,
-    pub shift_prefix: String,
+pub type ValidTimetables = Vec<PdfTimetableCollection>;
+pub type NextTimetableChangeDate = Option<Date>;
+
+#[derive(PartialEq)]
+pub enum TTBOptions {
+    None,
+    AppendFuture,
+    OnlyFirst,
+}
+
+impl TTBOptions {
+    pub fn from_bool(true_is_only_first: bool, value_if_false: Self) -> Self {
+        match true_is_only_first {
+            true => TTBOptions::OnlyFirst,
+            false => value_if_false,
+        }
+    }
 }
 
 struct ChangesCollection {
@@ -47,8 +59,8 @@ impl PdfTimetableCollection {
         file_id: usize,
     ) -> Result<Option<Self>> {
         // Load the PDF document.
-        let shift_data_map = ShiftData::load(&pdf_path, file_id)?;
-        let parsed_shifts = parse_pdf(&pdf_path, shift_data_map.clone())?;
+        let shift_data_map = ShiftData::new_from_pdf(&pdf_path, file_id)?;
+        let parsed_shifts = shift_parsing::parse_pdf(&pdf_path, shift_data_map.clone())?;
 
         let start_date = parsed_shifts
             .first()
@@ -82,6 +94,33 @@ impl PdfTimetableCollection {
                 shifts: parsed_shift_map,
             }))
         }
+    }
+
+    pub fn add_valid_from_data(
+        current_timetable_collections: Vec<Self>,
+        valid_from_paths: Vec<PathBuf>,
+    ) -> Vec<Self> {
+        let mut valid_froms = Vec::new();
+        for valid_from_path in valid_from_paths {
+            valid_froms.push(valid_on::parse_dates_from_file(&valid_from_path));
+        }
+
+        let mut new_timetable_collections = Vec::new();
+        for mut timetable in current_timetable_collections {
+            if let Some(valid_from) = valid_froms
+                .iter()
+                .find(|date| date.first() == Some(&timetable.start_date))
+            // If the first date in the valid_from file is equal to the start date of the timetable, that valid_form file is associated with that timetable
+            {
+                debug!(
+                    "Found matching valid_from file for timetable {:?}",
+                    valid_from.first()
+                );
+                timetable.valid_from = valid_from.clone();
+            }
+            new_timetable_collections.push(timetable);
+        }
+        new_timetable_collections
     }
 
     pub fn combine_from_changes_files(
@@ -151,33 +190,6 @@ impl PdfTimetableCollection {
         modified_timetables_list
     }
 
-    pub fn add_valid_from_data(
-        current_timetable_collections: Vec<Self>,
-        valid_from_paths: Vec<PathBuf>,
-    ) -> Vec<Self> {
-        let mut valid_froms = Vec::new();
-        for valid_from_path in valid_from_paths {
-            valid_froms.push(valid_on::parse_dates_from_file(&valid_from_path));
-        }
-
-        let mut new_timetable_collections = Vec::new();
-        for mut timetable in current_timetable_collections {
-            if let Some(valid_from) = valid_froms
-                .iter()
-                .find(|date| date.first() == Some(&timetable.start_date))
-            // If the first date in the valid_from file is equal to the start date of the timetable, that valid_form file is associated with that timetable
-            {
-                debug!(
-                    "Found matching valid_from file for timetable {:?}",
-                    valid_from.first()
-                );
-                timetable.valid_from = valid_from.clone();
-            }
-            new_timetable_collections.push(timetable);
-        }
-        new_timetable_collections
-    }
-
     pub fn save(collections: &Vec<Self>) -> Result<()> {
         for collection in collections {
             Shift::save_extracted_shifts(
@@ -240,10 +252,71 @@ impl PdfTimetableCollection {
             }
         }
     }
+
+    // load all pdf_collection files. And determine which one is current
+    // Also if it exists, save the date of when it gets invalidated (when the Next timetable starts)
+    // In reverse chronological order
+    // Upcoming timetables are placed in the beginning of the list, also in reverse order
+    pub fn get_valid_timetables(
+        date: Option<Date>,
+        options: TTBOptions,
+    ) -> Result<(ValidTimetables, NextTimetableChangeDate)> {
+        let collections = PdfTimetableCollection::get_global()?;
+        let current_date = match date {
+            Some(date) => date,
+            None => OffsetDateTime::now_utc().date(),
+        };
+        let mut upcoming_timetables: Vec<PdfTimetableCollection> = vec![];
+        let mut current_timetables: Vec<PdfTimetableCollection> = vec![];
+        // Loop over all files in the collection folder
+        for timetable_collection in collections {
+            //if the current collection date is higher than the last but lower than the system date. Make this the most recent one
+            if timetable_collection.start_date > current_date {
+                upcoming_timetables.push(timetable_collection);
+            }
+            // Create a list of all currently valid timetables
+            else if timetable_collection.start_date <= current_date {
+                current_timetables.push(timetable_collection)
+            }
+        }
+
+        let next_timetable = upcoming_timetables
+            .last()
+            .and_then(|x| Some(x.start_date.clone()));
+        // The future timetables should be the first in the list
+        let active_timetables = if options == TTBOptions::AppendFuture {
+            // first pop the last timetable (the most recent timetable)
+            let recent_timetable = current_timetables.pop();
+            let mut new_timetables = current_timetables;
+            // add the upcoming timetables to the non future timetables (except the first timetable)
+            new_timetables.append(&mut upcoming_timetables);
+            // Add the most recent timetable back to the list
+            if let Some(recent_timetable) = recent_timetable {
+                new_timetables.push(recent_timetable);
+            }
+            new_timetables
+        // } else if options == TTBOptions::OnlyFirst {
+        // vec![current_timetables.pop().result_reason("No timetables")?]
+        } else {
+            current_timetables
+        };
+
+        Ok((active_timetables, next_timetable))
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct ShiftData {
+    pub pages: Vec<u32>,
+    pub file_id: usize,
+    pub shift_prefix: String,
 }
 
 impl ShiftData {
-    pub fn load(path: &PathBuf, file_id: usize) -> Result<HashMap<String, ShiftData>> {
+    pub(self) fn new_from_pdf(
+        path: &PathBuf,
+        file_id: usize,
+    ) -> Result<HashMap<String, ShiftData>> {
         let doc = Document::load(&path)?;
 
         // Define a regex pattern that finds "Dienst" followed by a trip number.
@@ -272,7 +345,7 @@ impl ShiftData {
                     index
                         .entry(shift_number)
                         .and_modify(|shift_data| shift_data.pages.push(*page_num))
-                        .or_insert(ShiftData {
+                        .or_insert(Self {
                             pages: vec![*page_num],
                             file_id,
                             shift_prefix,
@@ -281,5 +354,30 @@ impl ShiftData {
             }
         }
         Ok(index)
+    }
+
+    // Recursive function to find a valid shift
+    pub fn find_shift(
+        shift_number: &str,
+        valid_timetables: &mut Vec<PdfTimetableCollection>,
+    ) -> Option<(PdfTimetableCollection, Self)> {
+        let current_timetable = match valid_timetables.pop() {
+            Some(timetable) => timetable,
+            None => return None, // If there are no more valid timetables while this check runs, the shift is not available
+        };
+
+        // // The current logic is (probably) sound enough to only return the first valid timetable. So the recursion is no longer needed
+        // if return_first {
+        //     return current_timetable
+        //         .pages
+        //         .get(shift_number)
+        //         .cloned()
+        //         .map(|val| (current_timetable, val));
+        // }
+
+        match current_timetable.pages.get(shift_number) {
+            Some(shift) => Some((current_timetable.clone(), shift.clone())),
+            None => Self::find_shift(shift_number, valid_timetables),
+        }
     }
 }

@@ -4,11 +4,11 @@ use actix_web::{App, HttpResponse, HttpServer, Responder, get, web};
 use color_eyre::eyre;
 use index::handle_index_request;
 use qpdf::QPdf;
-use std::fs::{self};
+use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
+use time::Date;
 use time::format_description::BorrowedFormatItem;
 use time::macros::format_description;
-use time::{Date, OffsetDateTime};
 
 use crate::parsing::*;
 pub use crate::prelude::*;
@@ -19,9 +19,6 @@ mod error;
 mod index;
 mod parsing;
 mod statistics;
-
-type ValidTimetables = Vec<PdfTimetableCollection>;
-type NextTimetableChangeDate = Option<Date>;
 
 const COLLECTION_PATH: &str = "pdf_collection";
 const SHIFT_PATH: &str = "shifts";
@@ -35,98 +32,6 @@ const DATE_FORMAT: &[BorrowedFormatItem<'_>] = format_description!["[day]-[month
 #[derive(Deserialize)]
 struct ShiftQuery {
     date: Option<String>, // Optional date query parameter
-}
-
-#[derive(PartialEq)]
-pub enum TTBOptions {
-    None,
-    AppendFuture,
-    OnlyFirst,
-}
-
-impl TTBOptions {
-    pub fn from_bool(true_is_only_first: bool, value_if_false: Self) -> Self {
-        match true_is_only_first {
-            true => TTBOptions::OnlyFirst,
-            false => value_if_false,
-        }
-    }
-}
-
-// load all pdf_collection files. And determine which one is current
-// Also if it exists, save the date of when it gets invalidated (when the Next timetable starts)
-// In reverse chronological order
-// Upcoming timetables are placed in the beginning of the list, also in reverse order
-fn get_valid_timetables(
-    date: Option<Date>,
-    options: TTBOptions,
-) -> Result<(ValidTimetables, NextTimetableChangeDate)> {
-    let collections = PdfTimetableCollection::get_global()?;
-    let current_date = match date {
-        Some(date) => date,
-        None => OffsetDateTime::now_utc().date(),
-    };
-    let mut upcoming_timetables: Vec<PdfTimetableCollection> = vec![];
-    let mut current_timetables: Vec<PdfTimetableCollection> = vec![];
-    // Loop over all files in the collection folder
-    for timetable_collection in collections {
-        //if the current collection date is higher than the last but lower than the system date. Make this the most recent one
-        if timetable_collection.start_date > current_date {
-            upcoming_timetables.push(timetable_collection);
-        }
-        // Create a list of all currently valid timetables
-        else if timetable_collection.start_date <= current_date {
-            current_timetables.push(timetable_collection)
-        }
-    }
-
-    let next_timetable = upcoming_timetables
-        .last()
-        .and_then(|x| Some(x.start_date.clone()));
-    // The future timetables should be the first in the list
-    let active_timetables = if options == TTBOptions::AppendFuture {
-        // first pop the last timetable (the most recent timetable)
-        let recent_timetable = current_timetables.pop();
-        let mut new_timetables = current_timetables;
-        // add the upcoming timetables to the non future timetables (except the first timetable)
-        new_timetables.append(&mut upcoming_timetables);
-        // Add the most recent timetable back to the list
-        if let Some(recent_timetable) = recent_timetable {
-            new_timetables.push(recent_timetable);
-        }
-        new_timetables
-    // } else if options == TTBOptions::OnlyFirst {
-    // vec![current_timetables.pop().result_reason("No timetables")?]
-    } else {
-        current_timetables
-    };
-
-    Ok((active_timetables, next_timetable))
-}
-
-// Recursive function to find a valid shift
-fn find_shift(
-    shift_number: &str,
-    valid_timetables: &mut Vec<PdfTimetableCollection>,
-) -> Option<(PdfTimetableCollection, ShiftData)> {
-    let current_timetable = match valid_timetables.pop() {
-        Some(timetable) => timetable,
-        None => return None, // If there are no more valid timetables while this check runs, the shift is not available
-    };
-
-    // // The current logic is (probably) sound enough to only return the first valid timetable. So the recursion is no longer needed
-    // if return_first {
-    //     return current_timetable
-    //         .pages
-    //         .get(shift_number)
-    //         .cloned()
-    //         .map(|val| (current_timetable, val));
-    // }
-
-    match current_timetable.clone().pages.get(shift_number) {
-        Some(shift) => Some((current_timetable, shift.clone())),
-        None => find_shift(shift_number, valid_timetables),
-    }
 }
 
 fn handle_refresh_request() -> HttpResponse {
@@ -159,11 +64,13 @@ async fn get_shift(request: web::Path<String>, query: web::Query<ShiftQuery>) ->
 
     let add_upcoming_timetables =
         TTBOptions::from_bool(custom_date_option.is_some(), TTBOptions::AppendFuture);
-    let mut valid_timetables =
-        match get_valid_timetables(custom_date_option, add_upcoming_timetables) {
-            Ok(result) => result.0,
-            Err(err) => return return_error(err),
-        };
+    let mut valid_timetables = match PdfTimetableCollection::get_valid_timetables(
+        custom_date_option,
+        add_upcoming_timetables,
+    ) {
+        Ok(result) => result.0,
+        Err(err) => return return_error(err),
+    };
 
     let mut shift_split = request_uppercase.split(".");
     let shift = shift_split.next().unwrap_or(&request_uppercase);
@@ -173,7 +80,7 @@ async fn get_shift(request: web::Path<String>, query: web::Query<ShiftQuery>) ->
     let numeric_shift_number: String = shift.chars().filter(|c| c.is_numeric()).collect();
 
     let (shift_collection, shift_data) =
-        match find_shift(&numeric_shift_number, &mut valid_timetables) {
+        match ShiftData::find_shift(&numeric_shift_number, &mut valid_timetables) {
             Some(shift) => shift,
             None => {
                 return HttpResponse::NotFound()

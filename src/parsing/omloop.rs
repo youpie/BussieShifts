@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use time::{Date, OffsetDateTime, Time, Weekday};
 
 use super::*;
-use crate::{TTBOptions, get_valid_timetables, prelude::*};
+use crate::prelude::*;
 
 pub type Omloop = usize;
 type Index = u8;
@@ -351,10 +351,11 @@ pub fn get_weekday_and_timetable(
 
     let day_of_the_week = date.weekday();
 
-    let timetable = match get_valid_timetables(Some(date), TTBOptions::OnlyFirst) {
-        Ok(v) if let Some(first_timetable) = v.0.last().cloned() => first_timetable,
-        _ => return Err(return_error(eyre!("Could not get timetable"))),
-    };
+    let timetable =
+        match PdfTimetableCollection::get_valid_timetables(Some(date), TTBOptions::OnlyFirst) {
+            Ok(v) if let Some(first_timetable) = v.0.last().cloned() => first_timetable,
+            _ => return Err(return_error(eyre!("Could not get timetable"))),
+        };
 
     Ok((day_of_the_week, timetable))
 }
