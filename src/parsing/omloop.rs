@@ -171,6 +171,7 @@ impl ShiftJobExtended {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct OmloopCollection {
     pub omloop: usize,
+    vehicle: Option<String>,
     jobs: Vec<ShiftJobExtended>,
 }
 
@@ -179,23 +180,28 @@ impl OmloopCollection {
         omlopen: &mut HashMap<(Omloop, Vec<ShiftValidDay>), Self>,
         shift: &Shift,
     ) {
+        let mut previous_job: ShiftJob = ShiftJob::default();
         for job in &shift.job {
             // If the omloop of the job is found in the OmloopDay hashmap. We add that job to that OmloopDay
             // We also need to make sure that it is of the same index
             if let Some(job_omloop) = job.omloop.or(job.assumed_omloop) {
-                if let Some(omloop_dag) = omlopen.get_mut(&(job_omloop, shift.valid_days.clone())) {
-                    omloop_dag
-                        .jobs
-                        .push(ShiftJobExtended::from_job(&shift, job.clone()));
-                } else {
-                    // If the omloop is not found in the Hasmap, we create a new instance
-                    let new_omloop_day = Self {
+                let vehicle = previous_job.is_vehicle_message();
+
+                omlopen
+                    .entry((job_omloop, shift.valid_days.clone()))
+                    .and_modify(|v| {
+                        v.jobs.push(ShiftJobExtended::from_job(&shift, job.clone()));
+                        if vehicle.is_some() {
+                            v.vehicle = vehicle.clone()
+                        }
+                    })
+                    .or_insert(Self {
                         omloop: job_omloop,
                         jobs: vec![ShiftJobExtended::from_job(&shift, job.clone())],
-                    };
-                    omlopen.insert((job_omloop, shift.valid_days.clone()), new_omloop_day);
-                }
+                        vehicle: vehicle,
+                    });
             }
+            previous_job = job.clone();
         }
     }
 
@@ -216,6 +222,9 @@ impl OmloopCollection {
         for mut omloop in omlopen {
             combined.omloop = omloop.omloop;
             combined.jobs.append(&mut omloop.jobs);
+            if omloop.vehicle.is_some() {
+                combined.vehicle = omloop.vehicle
+            }
         }
         combined.sort_jobs();
         combined
@@ -274,7 +283,7 @@ pub trait OmloopCollectionIO: Serialize {
     fn save(&self, omloop: Omloop, start_date: Date, index: Self::IndexType) -> Result<()> {
         let mut path = Self::get_path(omloop, start_date, index);
         _ = std::fs::create_dir_all(Self::get_base_path(start_date));
-        // fs::write(&path, serde_json::to_string_pretty(self)?)?;
+        fs::write(&path, serde_json::to_string_pretty(self)?)?;
         path.set_extension("bin");
         fs::write(&path, postcard::to_allocvec(&self)?)?;
         Ok(())
@@ -296,7 +305,7 @@ pub async fn get_omloop(
     query: web::Query<ShiftQuery>,
 ) -> impl Responder {
     info!("Got request for omloop {request} on {:?}", &query.date);
-    let (day_of_the_week, timetables) = match get_dow_and_timetable(query.date.as_deref()) {
+    let (day_of_the_week, timetables) = match get_weekday_and_timetable(query.date.as_deref()) {
         Ok(v) => v,
         Err(v) => return v,
     };
@@ -313,7 +322,7 @@ pub async fn get_omloop(
 #[get("/omloop/index")]
 pub async fn get_omloop_overview(query: web::Query<ShiftQuery>) -> HttpResponse {
     debug!("Got omloop index request on {:?}", query.date);
-    let (day_of_the_week, timetable) = match get_dow_and_timetable(query.date.as_deref()) {
+    let (day_of_the_week, timetable) = match get_weekday_and_timetable(query.date.as_deref()) {
         Ok(v) => v,
         Err(v) => return v,
     };
@@ -329,7 +338,7 @@ pub async fn get_omloop_overview(query: web::Query<ShiftQuery>) -> HttpResponse 
     }
 }
 
-pub fn get_dow_and_timetable(
+pub fn get_weekday_and_timetable(
     date_string: Option<&str>,
 ) -> Result<(Weekday, PdfTimetableCollection), HttpResponse> {
     let date = date_string

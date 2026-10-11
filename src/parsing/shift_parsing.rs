@@ -241,7 +241,7 @@ fn get_line_information(
         *last_job = job.clone();
 
         //println!("{:?}", &job);
-        if !job.empty() {
+        if !job.is_empty() {
             jobs.push(job);
         }
         *lijn_number = None;
@@ -459,7 +459,7 @@ fn message_type_finder(lijn_string: String) -> Option<JobMessageType> {
     let lijn_first_word = lijn_string.split_whitespace().next()?.to_lowercase();
     let message = match lijn_first_word.as_str() {
         "neem" => JobMessageType::NeemBus {
-            bustype: lijn_string.replace("neem ", ""),
+            bustype: lijn_string.replace("neem ", "").replace("Neem ", ""),
         },
         "bus" => JobMessageType::BusOp {
             lijn: lijn_string.replace("Bus op lijn ", "").parse().ok()?,

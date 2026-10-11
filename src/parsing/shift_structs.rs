@@ -122,7 +122,7 @@ pub struct ShiftJob {
 }
 
 impl ShiftJob {
-    pub fn empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         if self.job_type == JobType::Unknown
             && self.start.is_none()
             && self.end.is_none()
@@ -132,6 +132,33 @@ impl ShiftJob {
             return true;
         }
         false
+    }
+
+    pub fn is_vehicle_message(self) -> Option<String> {
+        if let ShiftJob {
+            job_type:
+                JobType::Melding {
+                    message:
+                        JobMessageType::NeemBus {
+                            bustype: vehicle_type,
+                        },
+                },
+            ..
+        } = self
+        {
+            Some(vehicle_type)
+        } else if let ShiftJob {
+            job_type:
+                JobType::Melding {
+                    message: JobMessageType::Other { 0: generic },
+                },
+            ..
+        } = self
+        {
+            Some(generic)
+        } else {
+            None
+        }
     }
 }
 

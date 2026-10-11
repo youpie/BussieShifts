@@ -300,7 +300,7 @@ struct DeadheadQuery {
 
 #[get("/deadheads")]
 pub async fn get_deadheads(query: web::Query<DeadheadQuery>) -> HttpResponse {
-    let (weekday, timetable) = match get_dow_and_timetable(query.date.as_deref()) {
+    let (weekday, timetable) = match get_weekday_and_timetable(query.date.as_deref()) {
         Ok(v) => v,
         Err(v) => return v,
     };
