@@ -164,7 +164,9 @@ impl ShiftJobExtended {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct OmloopCollection {
     pub omloop: usize,
-    pub vehicle: Option<String>,
+    #[serde(skip_serializing_if = "VehicleCertainty::is_unknown")]
+    pub vehicle_type: VehicleCertainty,
+    // pub vehicle: Option<String>,
     jobs: Vec<ShiftJobExtended>,
 }
 
@@ -184,14 +186,15 @@ impl OmloopCollection {
                     .entry((job_omloop, shift.valid_days.clone()))
                     .and_modify(|v| {
                         v.jobs.push(ShiftJobExtended::from_job(&shift, job.clone()));
-                        if vehicle.is_some() {
-                            v.vehicle = vehicle.clone()
+                        if !vehicle.is_unknown() {
+                            v.vehicle_type = vehicle.clone()
                         }
                     })
                     .or_insert(Self {
                         omloop: job_omloop,
                         jobs: vec![ShiftJobExtended::from_job(&shift, job.clone())],
-                        vehicle: vehicle,
+                        // vehicle: None,
+                        vehicle_type: vehicle,
                     });
             }
             previous_job = job.clone();
@@ -215,8 +218,8 @@ impl OmloopCollection {
         for mut omloop in omlopen {
             combined.omloop = omloop.omloop;
             combined.jobs.append(&mut omloop.jobs);
-            if omloop.vehicle.is_some() {
-                combined.vehicle = omloop.vehicle
+            if !omloop.vehicle_type.is_unknown() {
+                combined.vehicle_type = omloop.vehicle_type.choose(combined.vehicle_type.clone());
             }
         }
         combined.sort_jobs();

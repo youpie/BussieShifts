@@ -135,7 +135,7 @@ impl ShiftJob {
         false
     }
 
-    pub fn is_vehicle_message(self) -> Option<String> {
+    pub fn is_vehicle_message(self) -> VehicleCertainty {
         if let ShiftJob {
             job_type:
                 JobType::Melding {
@@ -147,7 +147,7 @@ impl ShiftJob {
             ..
         } = self
         {
-            Some(vehicle_type)
+            VehicleCertainty::Certain(vehicle_type)
         } else if let ShiftJob {
             job_type:
                 JobType::Melding {
@@ -156,9 +156,9 @@ impl ShiftJob {
             ..
         } = self
         {
-            Some(generic)
+            VehicleCertainty::Uncertain(generic)
         } else {
-            None
+            VehicleCertainty::Unknown
         }
     }
 }

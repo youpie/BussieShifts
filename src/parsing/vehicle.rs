@@ -55,14 +55,11 @@ impl VehicleCollection {
                 .filter_map(|omloop| {
                     omloop_index
                         .get_omloop(omloop, weekday)
-                        .map(|collection| {
-                            collection.vehicle.map(|vehicle_type| Vehicle {
-                                vehicle_type,
-                                omloop,
-                            })
+                        .map(|collection| Vehicle {
+                            vehicle_type: collection.vehicle_type,
+                            omloop,
                         })
                         .ok()
-                        .flatten()
                 })
                 .collect();
             let shift_collection = ShiftOmlopen::new(timetable);
@@ -85,5 +82,32 @@ impl OmloopCollectionIO for VehicleCollection {
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct Vehicle {
     omloop: Omloop,
-    vehicle_type: String,
+    vehicle_type: VehicleCertainty,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub enum VehicleCertainty {
+    Certain(String),
+    Uncertain(String),
+    #[default]
+    Unknown,
+}
+
+impl VehicleCertainty {
+    pub fn choose(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Certain(itself), _) => Self::Certain(itself),
+            (_, Self::Certain(other)) => Self::Certain(other),
+            (Self::Uncertain(itself), _) => Self::Uncertain(itself),
+            (_, Self::Uncertain(other)) => Self::Uncertain(other),
+            (Self::Unknown, Self::Unknown) => Self::Unknown,
+        }
+    }
+
+    pub fn is_unknown(&self) -> bool {
+        match self {
+            Self::Unknown => true,
+            _ => false,
+        }
+    }
 }
