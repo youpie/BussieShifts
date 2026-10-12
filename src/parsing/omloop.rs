@@ -107,13 +107,9 @@ impl OmloopDayIndex {
         path
     }
 
-    pub fn get_omloop(
-        omloop: usize,
-        day_of_week: Weekday,
-        timetable: &TimetableCollection,
-    ) -> Result<OmloopCollection> {
-        let index_map = Self::load(&timetable)?;
-        let indexes = index_map
+    pub fn get_omloop(&self, omloop: usize, day_of_week: Weekday) -> Result<OmloopCollection> {
+        // let index_map = Self::load(&timetable)?;
+        let indexes = self
             .day_indexes
             .get(&omloop)
             .and_then(|v| v.get(&(day_of_week as u8)))
@@ -121,22 +117,19 @@ impl OmloopDayIndex {
 
         let multiple_omlopen: Vec<OmloopCollection> = indexes
             .iter()
-            .filter_map(|ix| OmloopCollection::load(omloop, index_map.timetable_date, *ix).ok())
+            .filter_map(|ix| OmloopCollection::load(omloop, self.timetable_date, *ix).ok())
             .collect();
         let combined = OmloopCollection::combine_multiple(multiple_omlopen);
 
         Ok(combined)
     }
 
-    pub fn get_all_omloop(day: Weekday, timetable: &TimetableCollection) -> Result<Vec<Omloop>> {
-        let date_index = Self::load(timetable)?;
-        let omlopen = date_index
-            .day_indexes
+    pub fn get_all_omloop(&self, day: Weekday) -> Vec<Omloop> {
+        self.day_indexes
             .iter()
             .filter(|v| v.1.contains_key(&(day as u8)))
             .map(|v| *v.0)
-            .collect::<Vec<usize>>();
-        Ok(omlopen)
+            .collect::<Vec<usize>>()
     }
 }
 
@@ -171,7 +164,7 @@ impl ShiftJobExtended {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct OmloopCollection {
     pub omloop: usize,
-    vehicle: Option<String>,
+    pub vehicle: Option<String>,
     jobs: Vec<ShiftJobExtended>,
 }
 
@@ -310,9 +303,11 @@ pub async fn get_omloop(
         Err(v) => return v,
     };
 
-    match OmloopDayIndex::get_omloop(request.into_inner(), day_of_the_week, &timetables)
-        .map(|i| serde_json::to_string_pretty(&i))
-    {
+    match OmloopDayIndex::load(&timetables).map(|ix| {
+        ix.get_omloop(request.into_inner(), day_of_the_week)
+            .map(|i| Ok(serde_json::to_string_pretty(&i)?))
+            .flatten()
+    }) {
         Ok(Ok(v)) => HttpResponse::Ok().content_type(ContentType::json()).body(v),
         Ok(Err(e)) => return_error(e.into()),
         Err(e) => return_error(e),
@@ -327,7 +322,8 @@ pub async fn get_omloop_overview(query: web::Query<ShiftQuery>) -> HttpResponse 
         Err(v) => return v,
     };
 
-    match OmloopDayIndex::get_all_omloop(day_of_the_week, &timetable)
+    match OmloopDayIndex::load(&timetable)
+        .map(|ix| ix.get_all_omloop(day_of_the_week))
         .map(|omlopen| serde_json::to_string_pretty(&omlopen))
     {
         Ok(Ok(omlopen)) => HttpResponse::Ok()

@@ -469,7 +469,7 @@ impl JobMessageType {
                 bustype: lijn_string.replace("neem ", "").replace("Neem ", ""),
             },
             "bus" => Self::BusOp {
-                lijn: lijn_string.replace("Bus op lijn ", "").parse().ok()?,
+                lijn: *&lijn_string.to_number() as u32,
             },
             "pod" => Self::NeemBus {
                 bustype: lijn_string,
@@ -489,12 +489,9 @@ impl JobMessageType {
                 //TODO make this actual logic
                 dienstnummers: lijn_string,
             },
-            "minimaal" => {
-                let text_numbers: String =
-                    lijn_string.chars().filter(|c| c.is_ascii_digit()).collect();
-                let number: u8 = text_numbers.parse().unwrap_or_default();
-                Self::Soc { charge: number }
-            }
+            "minimaal" => Self::Soc {
+                charge: *&lijn_string.to_number() as u8,
+            },
             _ => Self::Other(lijn_string),
         };
         Some(message)

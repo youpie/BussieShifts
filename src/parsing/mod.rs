@@ -5,15 +5,17 @@ pub(super) mod shift_parsing;
 pub(super) mod timetable;
 pub(super) mod timetable_paths;
 pub(super) mod valid_on;
+pub(super) mod vehicle;
 
 use std::fs;
 
 pub(self) use deadhead::*;
 pub(self) use omloop::*;
 pub(self) use shift::*;
-pub(self) use shift_parsing::*;
+// pub(self) use shift_parsing::*;
 pub(self) use timetable::*;
 pub(self) use timetable_paths::*;
+pub(self) use vehicle::*;
 
 use crate::prelude::*;
 use time::Date;
@@ -54,8 +56,10 @@ pub fn parse_dienstboekjes() -> Result<()> {
     deadhead_locations.debug_locations();
 
     for timetable in &timetable_collections {
-        OmloopDayIndex::new_for_timetable(timetable)?;
-        DeadheadCollection::new_for_timetable(&deadhead_locations, timetable)?;
+        let omloop_index = OmloopDayIndex::new_for_timetable(timetable).note("Loading Omlopen")?;
+        DeadheadCollection::new_for_timetable(&deadhead_locations, timetable, &omloop_index)
+            .note("Loading Deadheads")?;
+        VehicleCollection::load(timetable, &omloop_index).note("Loading Vehicles")?;
     }
 
     TimetableCollection::load_to_global()?;

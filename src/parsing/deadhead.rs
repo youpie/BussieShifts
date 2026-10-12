@@ -217,10 +217,11 @@ impl<'a> DeadheadCollection<'a> {
     pub fn new_for_timetable(
         deadhead_locations: &DeadheadLocations,
         timetable: &TimetableCollection,
+        omloop_index: &OmloopDayIndex,
     ) -> Result<()> {
         let mut omlopen_per_day = Vec::new();
         for day in Weekday::get_all() {
-            let omlopen_on_day = (day, OmloopDayIndex::get_all_omloop(day, timetable)?);
+            let omlopen_on_day = (day, omloop_index.get_all_omloop(day));
             omlopen_per_day.push(omlopen_on_day);
         }
 
@@ -228,7 +229,7 @@ impl<'a> DeadheadCollection<'a> {
             let omlopen = day
                 .1
                 .into_iter()
-                .map(|omloop| OmloopDayIndex::get_omloop(omloop, day.0, timetable))
+                .map(|omloop| omloop_index.get_omloop(omloop, day.0))
                 .collect::<Result<Vec<OmloopCollection>>>()?;
 
             let mut deadheads_this_day = DeadheadCollection::default();
@@ -331,29 +332,5 @@ pub async fn get_locations() -> HttpResponse {
             .content_type(ContentType::json())
             .body(val),
         Err(e) => return_error(e),
-    }
-}
-
-trait GetAll {
-    fn get_all() -> Vec<Self>
-    where
-        Self: std::marker::Sized;
-}
-
-impl GetAll for Weekday {
-    /// Get an array of every day in the week
-    fn get_all() -> Vec<Self>
-    where
-        Self: std::marker::Sized,
-    {
-        vec![
-            Weekday::Monday,
-            Weekday::Tuesday,
-            Weekday::Wednesday,
-            Weekday::Thursday,
-            Weekday::Friday,
-            Weekday::Saturday,
-            Weekday::Sunday,
-        ]
     }
 }
