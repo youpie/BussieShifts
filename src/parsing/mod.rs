@@ -59,7 +59,7 @@ pub fn parse_dienstboekjes() -> Result<()> {
         let omloop_index = OmloopDayIndex::new_for_timetable(timetable).note("Loading Omlopen")?;
         DeadheadCollection::new_for_timetable(&deadhead_locations, timetable, &omloop_index)
             .note("Loading Deadheads")?;
-        VehicleCollection::load(timetable, &omloop_index).note("Loading Vehicles")?;
+        VehicleCollection::parse(timetable, &omloop_index).note("Loading Vehicles")?;
     }
 
     TimetableCollection::load_to_global()?;

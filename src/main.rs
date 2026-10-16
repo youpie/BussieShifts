@@ -15,6 +15,7 @@ use time::Date;
 use time::format_description::BorrowedFormatItem;
 use time::macros::format_description;
 
+use crate::parsing::*;
 pub use crate::prelude::*;
 
 pub mod prelude;
@@ -202,6 +203,9 @@ async fn main() -> std::io::Result<()> {
             .service(get_omloop)
             .service(get_deadheads)
             .service(get_locations)
+            .service(vehicle::get_all_vehicles)
+            .service(vehicle::get_vehicles_for_shift)
+            .service(vehicle::get_vehicles_for_omloop)
     })
     .bind("0.0.0.0:8080")?
     .run()
