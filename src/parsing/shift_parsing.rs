@@ -1,5 +1,3 @@
-use crate::collection::ShiftData;
-use crate::parsing::shift_structs::*;
 use float_ord::FloatOrd;
 use lopdf::Document;
 use regex::Regex;
@@ -9,8 +7,12 @@ use std::path::PathBuf;
 use time::{Date, Time};
 
 use super::*;
+use crate::prelude::*;
 
-pub fn parse_pdf(pdf_path: &PathBuf, shift_data: HashMap<String, ShiftData>) -> Result<Vec<Shift>> {
+pub fn parse_pdf(
+    pdf_path: &PathBuf,
+    shift_data: HashMap<String, ShiftEntry>,
+) -> Result<Vec<Shift>> {
     let doc = Document::load(pdf_path)?;
     let pages = doc.get_pages();
     let pagenr_hashmap = reverse_pagenr_hashmap(shift_data);
@@ -49,7 +51,7 @@ pub fn parse_pdf(pdf_path: &PathBuf, shift_data: HashMap<String, ShiftData>) -> 
     Ok(shifts)
 }
 
-fn reverse_pagenr_hashmap(hashmap: HashMap<String, ShiftData>) -> HashMap<u32, String> {
+fn reverse_pagenr_hashmap(hashmap: HashMap<String, ShiftEntry>) -> HashMap<u32, String> {
     let mut new_hashmap: HashMap<u32, String> = HashMap::new();
     for item in hashmap.into_iter() {
         item.1.pages.iter().for_each(|p| {
@@ -225,7 +227,7 @@ fn get_line_information(
     let eind_lower = 490.0 - 83.0 - offset;
     if last_y != current_y {
         //println!("Job gevonden!\nLijn {lijn:?}, omloop {omloop:?}, rit {rit:?}, van {van:?}, naar {naar:?}, begint om {start:?} en stopt om {eind:?}");
-        let mut job = job_creator(
+        let mut job = ShiftJob::new(
             lijn_number.clone(),
             omloop.clone(),
             rit.clone(),
@@ -242,7 +244,7 @@ fn get_line_information(
         *last_job = job.clone();
 
         //println!("{:?}", &job);
-        if !job.empty() {
+        if !job.is_empty() {
             jobs.push(job);
         }
         *lijn_number = None;
@@ -349,135 +351,149 @@ fn identify_metadata(
     Some(())
 }
 
-fn job_creator(
-    lijn: Option<String>,
-    omloop: Option<String>,
-    rit: Option<String>,
-    start: Option<String>,
-    eind: Option<String>,
-    van: Option<String>,
-    naar: Option<String>,
-) -> Result<ShiftJob, ShiftParseError> {
-    let mut omloop_number = None;
-    let mut job_type = JobType::Unknown;
-    let mut rit_number = None;
-    let mut start_time = None;
-    let mut end_time = None;
-    let mut next_day = false;
-    if let Some(lijn_string) = lijn {
-        if lijn_string == "MAT" {
-            job_type = JobType::Rijden {
-                drive_type: JobDrivingType::Mat,
-            };
-        } else if lijn_string == "Pauze" {
-            job_type = JobType::Pauze;
-        } else if let Ok(lijn_parse) = lijn_string.parse::<u32>() {
-            job_type = JobType::Rijden {
-                drive_type: JobDrivingType::Lijn(lijn_parse),
-            };
-        } else if lijn_string == "Op/Afstaptijd" {
-            job_type = JobType::OpAfstap;
-        } else {
-            let message = match message_type_finder(lijn_string.clone()) {
-                Some(message) => message,
-                None => JobMessageType::Other(lijn_string),
-            };
-            job_type = JobType::Melding { message };
-        }
-    }
-    if let Some(rit_string) = rit {
-        rit_number = rit_string.parse::<usize>().ok();
-    }
-    if let Some(start_string) = start {
-        (start_time, next_day) = to_iso8601(start_string, "Start time")?;
-    }
-    if let Some(end_string) = eind {
-        (end_time, _) = to_iso8601(end_string, "End time")?;
-    }
-    if let Some(omloop_string) = omloop {
-        match omloop_string.as_ref() {
-            "Onderbreking" => job_type = JobType::Onderbreking,
-            "Loop/Reis" => job_type = JobType::LoopReis,
-            "Rijklaar maken" => job_type = JobType::RijklaarMaken,
-            "Bus stallen/afm" => job_type = JobType::StallenAfmelden,
-            "Reserve" => job_type = JobType::Reserve,
-            _ => omloop_number = omloop_string.parse::<usize>().ok(),
-        };
-    }
-
-    Ok(ShiftJob {
-        job_type,
-        start: start_time,
-        end: end_time,
-        start_location: van,
-        end_location: naar,
-        omloop: omloop_number,
-        assumed_omloop: None,
-        rit: rit_number,
-        next_day,
-    })
-}
-
-fn to_iso8601(
-    time_string: String,
-    job_name: &str,
-) -> Result<(Option<Time>, bool), ShiftParseError> {
-    let mut time_split = time_string.split(":").into_iter();
-    let hour_noniso = time_split
-        .next()
-        .ok_or(ShiftParseError::Option {
-            function: "Time hour".to_string(),
-            parsing_job: Some(job_name.to_string()),
-            line: Some(time_string.clone()),
-        })?
-        .parse::<u8>()
-        .map_err(|err| ShiftParseError::GenericShiftError {
-            page_number: 1,
-            error: err.to_string(),
-            line: Some(time_string.clone()),
-        })?;
-    let minute = time_split
-        .next()
-        .ok_or(ShiftParseError::Option {
-            function: "Time minute".to_string(),
-            parsing_job: Some(job_name.to_string()),
-            line: Some(time_string.clone()),
-        })?
-        .parse::<u8>()
-        .map_err(|err| ShiftParseError::GenericShiftError {
-            page_number: 2,
-            error: err.to_string(),
-            line: Some(time_string.clone()),
-        })?;
-    let (hour_iso, next_day) = match hour_noniso {
-        24.. => (hour_noniso - 24, true),
-        _ => (hour_noniso, false),
-    };
-    Ok((Time::from_hms(hour_iso, minute, 0).ok(), next_day))
-}
-
-fn message_type_finder(lijn_string: String) -> Option<JobMessageType> {
-    let lijn_first_word = lijn_string.split_whitespace().next()?.to_lowercase();
-    let message = match lijn_first_word.as_str() {
-        "neem" => JobMessageType::NeemBus {
-            bustype: lijn_string.replace("neem ", ""),
-        },
-        "bus" => JobMessageType::BusOp {
-            lijn: lijn_string.replace("Bus op lijn ", "").parse().ok()?,
-        },
-        "pod" => JobMessageType::NeemBus {
-            bustype: lijn_string,
-        },
-        "pass" => {
-            let lijn_string_split = lijn_string.replace("Pass met ", "");
-            let mut dienst_omloop_split = lijn_string_split.split_whitespace().next()?.split('/');
-            JobMessageType::Passagieren {
-                dienstnummer: dienst_omloop_split.next()?.parse().ok()?,
-                omloop: dienst_omloop_split.next()?.to_string(),
+impl ShiftJob {
+    fn new(
+        lijn: Option<String>,
+        omloop: Option<String>,
+        rit: Option<String>,
+        start: Option<String>,
+        eind: Option<String>,
+        van: Option<String>,
+        naar: Option<String>,
+    ) -> Result<ShiftJob, ShiftParseError> {
+        let mut omloop_number = None;
+        let mut job_type = JobType::Unknown;
+        let mut rit_number = None;
+        let mut start_time = None;
+        let mut end_time = None;
+        let mut next_day = false;
+        if let Some(lijn_string) = lijn {
+            if lijn_string == "MAT" {
+                job_type = JobType::Rijden {
+                    drive_type: JobDrivingType::Mat,
+                };
+            } else if lijn_string == "Pauze" {
+                job_type = JobType::Pauze;
+            } else if let Ok(lijn_parse) = lijn_string.parse::<u32>() {
+                job_type = JobType::Rijden {
+                    drive_type: JobDrivingType::Lijn(lijn_parse),
+                };
+            } else if lijn_string == "Op/Afstaptijd" {
+                job_type = JobType::OpAfstap;
+            } else {
+                let message = JobMessageType::parse_message(lijn_string.clone())
+                    .unwrap_or(JobMessageType::Other(lijn_string));
+                job_type = JobType::Melding { message };
             }
         }
-        "meenemen" => JobMessageType::Other(lijn_string),
-        _ => JobMessageType::Other(lijn_string),
-    };
-    Some(message)
+        if let Some(rit_string) = rit {
+            rit_number = rit_string.parse::<usize>().ok();
+        }
+        if let Some(start_string) = start {
+            (start_time, next_day) = start_string.to_iso8601("Start time")?;
+        }
+        if let Some(end_string) = eind {
+            (end_time, _) = end_string.to_iso8601("End time")?;
+        }
+        if let Some(omloop_string) = omloop {
+            match omloop_string.as_ref() {
+                "Onderbreking" => job_type = JobType::Onderbreking,
+                "Loop/Reis" => job_type = JobType::LoopReis,
+                "Rijklaar maken" => job_type = JobType::RijklaarMaken,
+                "Bus stallen/afm" => job_type = JobType::StallenAfmelden,
+                "Reserve" => job_type = JobType::Reserve,
+                _ => omloop_number = omloop_string.parse::<usize>().ok(),
+            };
+        }
+
+        Ok(Self {
+            job_type,
+            start: start_time,
+            end: end_time,
+            start_location: van,
+            end_location: naar,
+            omloop: omloop_number,
+            assumed_omloop: None,
+            rit: rit_number,
+            next_day,
+        })
+    }
+}
+
+trait ToIso {
+    fn to_iso8601(self, job_name: &str) -> Result<(Option<Time>, bool), ShiftParseError>;
+}
+
+impl ToIso for String {
+    fn to_iso8601(self, job_name: &str) -> Result<(Option<Time>, bool), ShiftParseError> {
+        let mut time_split = self.split(":").into_iter();
+        let hour_noniso = time_split
+            .next()
+            .ok_or(ShiftParseError::Option {
+                function: "Time hour".to_string(),
+                parsing_job: Some(job_name.to_string()),
+                line: Some(self.clone()),
+            })?
+            .parse::<u8>()
+            .map_err(|err| ShiftParseError::GenericShiftError {
+                page_number: 1,
+                error: err.to_string(),
+                line: Some(self.clone()),
+            })?;
+        let minute = time_split
+            .next()
+            .ok_or(ShiftParseError::Option {
+                function: "Time minute".to_string(),
+                parsing_job: Some(job_name.to_string()),
+                line: Some(self.clone()),
+            })?
+            .parse::<u8>()
+            .map_err(|err| ShiftParseError::GenericShiftError {
+                page_number: 2,
+                error: err.to_string(),
+                line: Some(self.clone()),
+            })?;
+        let (hour_iso, next_day) = match hour_noniso {
+            24.. => (hour_noniso - 24, true),
+            _ => (hour_noniso, false),
+        };
+        Ok((Time::from_hms(hour_iso, minute, 0).ok(), next_day))
+    }
+}
+
+impl JobMessageType {
+    fn parse_message(lijn_string: String) -> Option<Self> {
+        let lijn_first_word = lijn_string.split_whitespace().next()?.to_lowercase();
+        let message = match lijn_first_word.as_str() {
+            "neem" => Self::NeemBus {
+                bustype: lijn_string.replace("neem ", "").replace("Neem ", ""),
+            },
+            "bus" => Self::BusOp {
+                lijn: *&lijn_string.to_number() as u32,
+            },
+            "pod" => Self::NeemBus {
+                bustype: lijn_string,
+            },
+            "pass" => {
+                let lijn_string_split = lijn_string
+                    .replace("Pass met ", "")
+                    .replace("pass met ", "");
+                let mut dienst_omloop_split =
+                    lijn_string_split.split_whitespace().next()?.split('/');
+                Self::Passagieren {
+                    dienstnummer: dienst_omloop_split.next()?.parse().ok()?,
+                    omloop: dienst_omloop_split.next()?.to_string(),
+                }
+            }
+            "meenemen" => Self::Meenemen {
+                //TODO make this actual logic
+                dienstnummers: lijn_string,
+            },
+            "minimaal" => Self::Soc {
+                charge: *&lijn_string.to_number() as u8,
+            },
+            _ => Self::Other(lijn_string),
+        };
+        Some(message)
+    }
 }

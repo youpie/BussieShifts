@@ -3,9 +3,8 @@ use std::{fs, io, path::PathBuf};
 use thiserror::Error;
 use time::{Date, Time};
 
-use crate::collection::PdfTimetableCollection;
-
 use super::*;
+use crate::prelude::*;
 
 #[derive(Error, Debug, Serialize, Deserialize, Clone)]
 pub enum ShiftParseError {
@@ -73,10 +72,11 @@ pub enum JobDrivingType {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum JobMessageType {
-    Meenemen { dienstnummers: Vec<u32> },
+    Meenemen { dienstnummers: String },
     Passagieren { dienstnummer: u32, omloop: String },
     BusOp { lijn: u32 },
     NeemBus { bustype: String },
+    Soc { charge: u8 },
     Other(String),
 }
 
@@ -123,7 +123,7 @@ pub struct ShiftJob {
 }
 
 impl ShiftJob {
-    pub fn empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         if self.job_type == JobType::Unknown
             && self.start.is_none()
             && self.end.is_none()
@@ -133,6 +133,33 @@ impl ShiftJob {
             return true;
         }
         false
+    }
+
+    pub fn is_vehicle_message(self) -> VehicleCertainty {
+        if let ShiftJob {
+            job_type:
+                JobType::Melding {
+                    message:
+                        JobMessageType::NeemBus {
+                            bustype: vehicle_type,
+                        },
+                },
+            ..
+        } = self
+        {
+            VehicleCertainty::Certain(vehicle_type)
+        } else if let ShiftJob {
+            job_type:
+                JobType::Melding {
+                    message: JobMessageType::Other { 0: generic },
+                },
+            ..
+        } = self
+        {
+            VehicleCertainty::Uncertain(generic)
+        } else {
+            VehicleCertainty::Unknown
+        }
     }
 }
 
@@ -149,13 +176,13 @@ pub struct Shift {
 }
 
 impl Shift {
-    pub fn _load(timetable: &PdfTimetableCollection, id: &str) -> Result<Self> {
+    pub fn _load(timetable: &TimetableCollection, id: &str) -> Result<Self> {
         Ok(serde_json::from_str::<Self>(&Self::load_json(
             timetable, id,
         )?)?)
     }
 
-    pub fn load_json(timetable: &PdfTimetableCollection, id: &str) -> Result<String> {
+    pub fn load_json(timetable: &TimetableCollection, id: &str) -> Result<String> {
         let base_path = timetable.base_start().format(DATE_FORMAT)?;
         let path = PathBuf::from(format!(
             "{COLLECTION_PATH}/{base_path}/{SHIFT_PATH}/{id}.json"

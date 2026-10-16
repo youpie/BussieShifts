@@ -4,12 +4,9 @@ use std::path::PathBuf;
 use time::Date;
 use walkdir::WalkDir;
 
-use crate::{
-    collection::PdfTimetableCollection, get_valid_timetables, index::get_valid_shifts,
-    parsing::shift_structs::Shift, return_error,
-};
-
-use crate::{TTBOptions, prelude::*};
+use crate::index::IndexShift;
+use crate::parsing::{shift::Shift, timetable::*};
+use crate::prelude::*;
 
 #[derive(Serialize, Deserialize)]
 pub struct Statistics {
@@ -26,14 +23,14 @@ pub struct Statistics {
 }
 
 impl Statistics {
-    fn create_statistics(date: Option<Date>) -> Result<Self> {
-        let active_timetables = get_valid_timetables(date, TTBOptions::None)?;
+    fn create(date: Option<Date>) -> Result<Self> {
+        let active_timetables = TimetableCollection::get_valid_timetables(date, TTBOptions::None)?;
         debug!("Set date {date:?}");
         for ttb in &active_timetables.0 {
             debug!("{}", ttb.start_date);
         }
 
-        let timetables = PdfTimetableCollection::get_global()?;
+        let timetables = TimetableCollection::get_global()?;
         let active_shifts = active_timetables
             .0
             .iter()
@@ -52,7 +49,7 @@ impl Statistics {
             .1
             .and_then(|valid_date| valid_date.format(DATE_FORMAT).ok());
         let errored_shifts = Statistics::get_errored_shifts()?;
-        let valid_shifts = get_valid_shifts(date)?.len() as u64;
+        let valid_shifts = IndexShift::get_valid_shifts(date)?.len() as u64;
         Ok(Self {
             shifts,
             valid_shifts,
@@ -98,9 +95,9 @@ impl Statistics {
 }
 
 pub fn handle_stats_request(date: Option<Date>) -> HttpResponse {
-    match Statistics::create_statistics(date) {
+    match Statistics::create(date) {
         Ok(statistics) => {
-            let json = serde_json::to_string_pretty(&statistics).unwrap();
+            let json = serde_json::to_string_pretty(&statistics).unwrap_or_default();
             HttpResponse::Ok()
                 .content_type(ContentType::json())
                 .body(json)

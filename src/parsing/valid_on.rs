@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf};
 
 use time::Date;
 
-use super::*;
+use crate::prelude::*;
 
 /// Load dates from a file of sequential dates. Load this from `valid_on.txt` or `changes.txt`
 ///
