@@ -164,9 +164,8 @@ impl ShiftJobExtended {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct OmloopCollection {
     pub omloop: usize,
-    #[serde(skip_serializing_if = "VehicleCertainty::is_unknown")]
-    pub vehicle_type: VehicleCertainty,
-    // pub vehicle: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub vehicle_type: Vec<VehicleCertainty>,
     jobs: Vec<ShiftJobExtended>,
 }
 
@@ -187,14 +186,20 @@ impl OmloopCollection {
                     .and_modify(|v| {
                         v.jobs.push(ShiftJobExtended::from_job(&shift, job.clone()));
                         if !vehicle.is_unknown() {
-                            v.vehicle_type = vehicle.clone()
+                            v.vehicle_type.push(vehicle.clone());
                         }
                     })
-                    .or_insert(Self {
-                        omloop: job_omloop,
-                        jobs: vec![ShiftJobExtended::from_job(&shift, job.clone())],
-                        // vehicle: None,
-                        vehicle_type: vehicle,
+                    .or_insert_with(|| {
+                        let mut obj = Self {
+                            omloop: job_omloop,
+                            jobs: vec![ShiftJobExtended::from_job(&shift, job.clone())],
+                            // vehicle: None,
+                            vehicle_type: Vec::new(),
+                        };
+                        if !vehicle.is_unknown() {
+                            obj.vehicle_type.push(vehicle);
+                        }
+                        obj
                     });
             }
             previous_job = job.clone();
@@ -218,9 +223,7 @@ impl OmloopCollection {
         for mut omloop in omlopen {
             combined.omloop = omloop.omloop;
             combined.jobs.append(&mut omloop.jobs);
-            if !omloop.vehicle_type.is_unknown() {
-                combined.vehicle_type = omloop.vehicle_type.choose(combined.vehicle_type.clone());
-            }
+            combined.vehicle_type.append(&mut omloop.vehicle_type);
         }
         combined.sort_jobs();
         combined
@@ -308,6 +311,10 @@ pub async fn get_omloop(
 
     match OmloopDayIndex::load(&timetables).map(|ix| {
         ix.get_omloop(request.into_inner(), day_of_the_week)
+            .map(|mut i| {
+                i.vehicle_type.clear(); // Remove all vehicle types. As the only reliable way to get vehicle type is by calling /vehicle
+                i
+            })
             .map(|i| Ok(serde_json::to_string_pretty(&i)?))
             .flatten()
     }) {
