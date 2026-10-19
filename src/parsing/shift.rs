@@ -2,11 +2,12 @@ use serde::{Deserialize, Serialize};
 use std::{fs, io, path::PathBuf};
 use thiserror::Error;
 use time::{Date, Time};
+use utoipa::ToSchema;
 
 use super::*;
 use crate::prelude::*;
 
-#[derive(Error, Debug, Serialize, Deserialize, Clone)]
+#[derive(Error, Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub enum ShiftParseError {
     #[error("Shift on page {page_number} had a generic error {error_string}\nline: {line:?}",error_string = error.to_string())]
     GenericShiftError {
@@ -27,7 +28,7 @@ pub enum ShiftParseError {
     },
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default, Eq, Hash, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, Eq, Hash, PartialEq, ToSchema)]
 pub enum ShiftValidDay {
     Monday = 0,
     Tuesday,
@@ -40,37 +41,27 @@ pub enum ShiftValidDay {
     Unknown,
 }
 
-/// **Remove in the future!!!!!!!!!!!!!!!!!!!**
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum ShiftValid {
-    Weekdays,
-    Wednesday,
-    #[serde(rename = "Weekdays except Wednesdays")]
-    WeekdaysExceptWednesday,
-    Saturday,
-    Sunday,
-    Unknown,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub enum ShiftType {
     Vroeg,
     Tussen,
     Dag,
     Gebroken {
+        #[schema(value_type = String)]
         start_break: Option<Time>,
+        #[schema(value_type = String)]
         end_break: Option<Time>,
     }, // If one is none, it means it's half of a broken shift
     Laat,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
 pub enum JobDrivingType {
     Lijn(u32),
     Mat,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, ToSchema)]
 pub enum JobMessageType {
     Meenemen { dienstnummers: String },
     Passagieren { dienstnummer: u32, omloop: String },
@@ -80,7 +71,7 @@ pub enum JobMessageType {
     Other(String),
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Default, ToSchema)]
 pub enum JobType {
     Rijden {
         drive_type: JobDrivingType,
@@ -108,10 +99,12 @@ impl JobType {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, ToSchema)]
 pub struct ShiftJob {
     pub job_type: JobType,
+    #[schema(value_type = String)]
     pub start: Option<Time>,
+    #[schema(value_type = String)]
     pub end: Option<Time>,
     pub start_location: Option<String>,
     pub end_location: Option<String>, // If none, it's the same as start
@@ -163,10 +156,9 @@ impl ShiftJob {
     }
 }
 
-#[derive(Debug, Serialize, Clone, Deserialize)]
+#[derive(Debug, Serialize, Clone, Deserialize, ToSchema)]
 pub struct Shift {
     pub shift_nr: String,
-    pub valid_on: ShiftValid,
     pub valid_days: Vec<ShiftValidDay>,
     pub location: String,
     pub shift_type: Option<ShiftType>,

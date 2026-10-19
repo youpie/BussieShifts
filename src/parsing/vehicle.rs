@@ -7,7 +7,7 @@ use time::Weekday;
 use super::*;
 use crate::prelude::*;
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, ToSchema)]
 struct ShiftOmlopen {
     shift: usize,
     omlopen: Vec<Omloop>,
@@ -38,7 +38,7 @@ impl ShiftOmlopen {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Default, new)]
+#[derive(Debug, Serialize, Deserialize, Default, new, ToSchema)]
 pub struct VehicleCollection {
     weekday: u8,
     vehicle_map: HashMap<u32, String>,
@@ -134,13 +134,13 @@ impl OmloopCollectionIO for VehicleCollection {
     type IndexType = Weekday;
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, ToSchema)]
 struct Vehicle {
     omloop: Omloop,
     vehicle_id: Vec<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default, ToSchema)]
 pub enum VehicleCertainty {
     Certain(String),
     Uncertain(String),
@@ -236,6 +236,7 @@ impl FilterVehicles for Vec<Vehicle> {
     }
 }
 
+#[utoipa::path(responses((status = OK, body = Vec<String>)))]
 #[get("/vehicles/shift/{shift_number}")]
 pub async fn get_vehicles_for_shift(
     request: web::Path<usize>,
@@ -260,6 +261,7 @@ pub async fn get_vehicles_for_shift(
     }
 }
 
+#[utoipa::path(responses((status = OK, body = String)))]
 #[get("/vehicles/omloop/{shift_number}")]
 pub async fn get_vehicles_for_omloop(
     request: web::Path<usize>,
@@ -286,6 +288,7 @@ pub async fn get_vehicles_for_omloop(
     }
 }
 
+#[utoipa::path(responses((status = OK, body = Vec<String>)))]
 #[get("/vehicles/index")]
 pub async fn get_all_vehicles(query: web::Query<ShiftQuery>) -> HttpResponse {
     let (_, timetable) = match get_weekday_and_timetable(query.date.as_deref()) {

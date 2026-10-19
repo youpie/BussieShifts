@@ -14,6 +14,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use time::Date;
 use time::format_description::BorrowedFormatItem;
 use time::macros::format_description;
+use utoipa_actix_web::AppExt;
 
 use crate::parsing::*;
 pub use crate::prelude::*;
@@ -48,6 +49,7 @@ fn handle_refresh_request() -> HttpResponse {
     }
 }
 
+#[utoipa::path(responses((status = OK, body = Shift)))]
 #[get("/shift/{shift_number}")]
 async fn get_shift(request: web::Path<String>, query: web::Query<ShiftQuery>) -> impl Responder {
     debug!("Got request for {}", request);
@@ -197,7 +199,8 @@ async fn main() -> std::io::Result<()> {
     let _ = fs::write("pdf_hash", current_hash.to_le_bytes());
 
     HttpServer::new(move || {
-        App::new()
+        let (server, api) = App::new()
+            .into_utoipa_app()
             .service(get_shift)
             .service(get_omloop_overview)
             .service(get_omloop)
@@ -206,6 +209,9 @@ async fn main() -> std::io::Result<()> {
             .service(vehicle::get_all_vehicles)
             .service(vehicle::get_vehicles_for_shift)
             .service(vehicle::get_vehicles_for_omloop)
+            .split_for_parts();
+        _ = std::fs::write("./doc.json", serde_json::to_string_pretty(&api).unwrap());
+        server
     })
     .bind("0.0.0.0:8080")?
     .run()

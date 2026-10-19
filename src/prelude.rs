@@ -4,6 +4,8 @@ pub use color_eyre::eyre::{Context, Result, WrapErr, eyre};
 pub use serde::{Deserialize, Serialize};
 use time::Weekday;
 pub use tracing::{debug, error, info, span, trace, warn};
+pub use utoipa::ToSchema;
+pub use utoipa_actix_web::{AppExt, scope};
 
 pub(crate) use crate::{COLLECTION_PATH, DATE_FORMAT, SHIFT_PATH, ShiftQuery, return_error};
 

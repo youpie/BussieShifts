@@ -134,10 +134,12 @@ impl OmloopDayIndex {
 }
 
 /// Added the shift number to the omloop
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default, ToSchema)]
 pub struct ShiftJobExtended {
     pub job_type: JobType,
+    #[schema(value_type = String)]
     pub start: Option<Time>,
+    #[schema(value_type = String)]
     pub end: Option<Time>,
     pub start_location: Option<String>,
     pub end_location: Option<String>,
@@ -161,7 +163,7 @@ impl ShiftJobExtended {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, ToSchema)]
 pub struct OmloopCollection {
     pub omloop: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -298,6 +300,7 @@ pub trait OmloopCollectionIO: Serialize {
     }
 }
 
+#[utoipa::path(responses((status = OK, body = OmloopCollection)))]
 #[get("/omloop/{omloop_number}")]
 pub async fn get_omloop(
     request: web::Path<usize>,
@@ -324,6 +327,7 @@ pub async fn get_omloop(
     }
 }
 
+#[utoipa::path(responses((status = OK, body = Vec<usize>)))]
 #[get("/omloop/index")]
 pub async fn get_omloop_overview(query: web::Query<ShiftQuery>) -> HttpResponse {
     debug!("Got omloop index request on {:?}", query.date);

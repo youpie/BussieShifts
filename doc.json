@@ -1,0 +1,872 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "utoipa-actix-web",
+    "description": "Utoipa's actix-web bindings for seamless integration of the two",
+    "contact": {
+      "name": "Juha Kukkonen",
+      "email": "juha7kukkonen@gmail.com"
+    },
+    "license": {
+      "name": "MIT OR Apache-2.0",
+      "identifier": "MIT OR Apache-2.0"
+    },
+    "version": "0.2.0"
+  },
+  "paths": {
+    "/deadheads": {
+      "get": {
+        "operationId": "get_deadheads",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Deadhead"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/deadheads/locations": {
+      "get": {
+        "operationId": "get_locations",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": false,
+                    "prefixItems": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/omloop/index": {
+      "get": {
+        "operationId": "get_omloop_overview",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/omloop/{omloop_number}": {
+      "get": {
+        "operationId": "get_omloop",
+        "parameters": [
+          {
+            "name": "omloop_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OmloopCollection"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shift/{shift_number}": {
+      "get": {
+        "operationId": "get_shift",
+        "parameters": [
+          {
+            "name": "shift_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Shift"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/vehicles/index": {
+      "get": {
+        "operationId": "get_all_vehicles",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/vehicles/omloop/{shift_number}": {
+      "get": {
+        "operationId": "get_vehicles_for_omloop",
+        "parameters": [
+          {
+            "name": "shift_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/vehicles/shift/{shift_number}": {
+      "get": {
+        "operationId": "get_vehicles_for_shift",
+        "parameters": [
+          {
+            "name": "shift_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Deadhead": {
+        "type": "object",
+        "required": [
+          "from",
+          "to",
+          "start",
+          "end",
+          "omloop",
+          "shift"
+        ],
+        "properties": {
+          "end": {
+            "type": "string"
+          },
+          "from": {
+            "$ref": "#/components/schemas/DeadheadLocation"
+          },
+          "omloop": {
+            "$ref": "#/components/schemas/usize"
+          },
+          "shift": {
+            "type": "string"
+          },
+          "start": {
+            "type": "string"
+          },
+          "to": {
+            "$ref": "#/components/schemas/DeadheadLocation"
+          }
+        }
+      },
+      "DeadheadLocation": {
+        "type": "object",
+        "required": [
+          "specific"
+        ],
+        "properties": {
+          "general": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "specific": {
+            "type": "string"
+          }
+        }
+      },
+      "JobDrivingType": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "Lijn"
+            ],
+            "properties": {
+              "Lijn": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "string",
+            "enum": [
+              "Mat"
+            ]
+          }
+        ]
+      },
+      "JobMessageType": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "Meenemen"
+            ],
+            "properties": {
+              "Meenemen": {
+                "type": "object",
+                "required": [
+                  "dienstnummers"
+                ],
+                "properties": {
+                  "dienstnummers": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "Passagieren"
+            ],
+            "properties": {
+              "Passagieren": {
+                "type": "object",
+                "required": [
+                  "dienstnummer",
+                  "omloop"
+                ],
+                "properties": {
+                  "dienstnummer": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  },
+                  "omloop": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "BusOp"
+            ],
+            "properties": {
+              "BusOp": {
+                "type": "object",
+                "required": [
+                  "lijn"
+                ],
+                "properties": {
+                  "lijn": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "NeemBus"
+            ],
+            "properties": {
+              "NeemBus": {
+                "type": "object",
+                "required": [
+                  "bustype"
+                ],
+                "properties": {
+                  "bustype": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "Soc"
+            ],
+            "properties": {
+              "Soc": {
+                "type": "object",
+                "required": [
+                  "charge"
+                ],
+                "properties": {
+                  "charge": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "Other"
+            ],
+            "properties": {
+              "Other": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "JobType": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "Rijden"
+            ],
+            "properties": {
+              "Rijden": {
+                "type": "object",
+                "required": [
+                  "drive_type"
+                ],
+                "properties": {
+                  "drive_type": {
+                    "$ref": "#/components/schemas/JobDrivingType"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "string",
+            "enum": [
+              "Pauze"
+            ]
+          },
+          {
+            "type": "string",
+            "enum": [
+              "Onderbreking"
+            ]
+          },
+          {
+            "type": "string",
+            "enum": [
+              "OpAfstap"
+            ]
+          },
+          {
+            "type": "string",
+            "enum": [
+              "RijklaarMaken"
+            ]
+          },
+          {
+            "type": "string",
+            "enum": [
+              "StallenAfmelden"
+            ]
+          },
+          {
+            "type": "object",
+            "required": [
+              "Melding"
+            ],
+            "properties": {
+              "Melding": {
+                "type": "object",
+                "required": [
+                  "message"
+                ],
+                "properties": {
+                  "message": {
+                    "$ref": "#/components/schemas/JobMessageType"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "string",
+            "enum": [
+              "LoopReis"
+            ]
+          },
+          {
+            "type": "string",
+            "enum": [
+              "Reserve"
+            ]
+          },
+          {
+            "type": "string",
+            "enum": [
+              "Unknown"
+            ]
+          }
+        ]
+      },
+      "OmloopCollection": {
+        "type": "object",
+        "required": [
+          "omloop",
+          "jobs"
+        ],
+        "properties": {
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ShiftJobExtended"
+            }
+          },
+          "omloop": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "vehicle_type": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VehicleCertainty"
+            }
+          }
+        }
+      },
+      "Shift": {
+        "type": "object",
+        "required": [
+          "shift_nr",
+          "valid_days",
+          "location",
+          "job",
+          "starting_date"
+        ],
+        "properties": {
+          "job": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ShiftJob"
+            }
+          },
+          "location": {
+            "type": "string"
+          },
+          "parse_error": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ShiftParseError"
+            }
+          },
+          "shift_nr": {
+            "type": "string"
+          },
+          "shift_type": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ShiftType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "starting_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "valid_days": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ShiftValidDay"
+            }
+          }
+        }
+      },
+      "ShiftJob": {
+        "type": "object",
+        "required": [
+          "job_type",
+          "start",
+          "end"
+        ],
+        "properties": {
+          "assumed_omloop": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "end": {
+            "type": "string"
+          },
+          "end_location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "job_type": {
+            "$ref": "#/components/schemas/JobType"
+          },
+          "omloop": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "rit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "start": {
+            "type": "string"
+          },
+          "start_location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ShiftJobExtended": {
+        "type": "object",
+        "description": "Added the shift number to the omloop",
+        "required": [
+          "job_type",
+          "start",
+          "end",
+          "shift",
+          "next_day"
+        ],
+        "properties": {
+          "end": {
+            "type": "string"
+          },
+          "end_location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "job_type": {
+            "$ref": "#/components/schemas/JobType"
+          },
+          "next_day": {
+            "type": "boolean"
+          },
+          "rit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "shift": {
+            "type": "string"
+          },
+          "start": {
+            "type": "string"
+          },
+          "start_location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ShiftParseError": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "GenericShiftError"
+            ],
+            "properties": {
+              "GenericShiftError": {
+                "type": "object",
+                "required": [
+                  "page_number",
+                  "error"
+                ],
+                "properties": {
+                  "error": {
+                    "type": "string"
+                  },
+                  "line": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "page_number": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "MetadataFailure"
+            ],
+            "properties": {
+              "MetadataFailure": {
+                "type": "object",
+                "required": [
+                  "page_number"
+                ],
+                "properties": {
+                  "line": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "page_number": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "Option"
+            ],
+            "properties": {
+              "Option": {
+                "type": "object",
+                "required": [
+                  "function"
+                ],
+                "properties": {
+                  "function": {
+                    "type": "string"
+                  },
+                  "line": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "parsing_job": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ShiftType": {
+        "oneOf": [
+          {
+            "type": "string",
+            "enum": [
+              "Vroeg"
+            ]
+          },
+          {
+            "type": "string",
+            "enum": [
+              "Tussen"
+            ]
+          },
+          {
+            "type": "string",
+            "enum": [
+              "Dag"
+            ]
+          },
+          {
+            "type": "object",
+            "required": [
+              "Gebroken"
+            ],
+            "properties": {
+              "Gebroken": {
+                "type": "object",
+                "required": [
+                  "start_break",
+                  "end_break"
+                ],
+                "properties": {
+                  "end_break": {
+                    "type": "string"
+                  },
+                  "start_break": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "string",
+            "enum": [
+              "Laat"
+            ]
+          }
+        ]
+      },
+      "ShiftValidDay": {
+        "type": "string",
+        "enum": [
+          "Monday",
+          "Tuesday",
+          "Wednsesday",
+          "Thursday",
+          "Friday",
+          "Saturday",
+          "Sunday",
+          "Unknown"
+        ]
+      },
+      "VehicleCertainty": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "Certain"
+            ],
+            "properties": {
+              "Certain": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "Uncertain"
+            ],
+            "properties": {
+              "Uncertain": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "string",
+            "enum": [
+              "Unknown"
+            ]
+          }
+        ]
+      },
+      "usize": {
+        "type": "integer",
+        "minimum": 0
+      }
+    }
+  }
+}

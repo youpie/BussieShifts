@@ -140,7 +140,6 @@ fn get_line_element(
     let mut naar: Option<String> = None;
     let mut eind: Option<String> = None;
     let mut start_date = Date::from_calendar_date(2025, time::Month::June, 29)?;
-    let mut valid_on = ShiftValid::Unknown;
     let mut valid_days = Vec::new();
     let mut shift_number = shift_number;
     let mut location = String::new();
@@ -158,7 +157,6 @@ fn get_line_element(
             &mut jobs,
             &mut last_job,
             &mut start_date,
-            &mut valid_on,
             &mut valid_days,
             &mut shift_number,
             &mut location,
@@ -176,7 +174,6 @@ fn get_line_element(
     }
     Ok(Shift {
         shift_nr: shift_number,
-        valid_on,
         valid_days,
         location,
         shift_type: None,
@@ -201,7 +198,6 @@ fn get_line_information(
     jobs: &mut Vec<ShiftJob>,
     last_job: &mut ShiftJob,
     start_date: &mut Date,
-    valid_on: &mut ShiftValid,
     valid_days: &mut Vec<ShiftValidDay>,
     shift_number: &mut String,
     location: &mut String,
@@ -260,7 +256,6 @@ fn get_line_information(
         let metadata = line.clone();
         identify_metadata(
             &mut *start_date,
-            &mut *valid_on,
             &mut *valid_days,
             &mut *shift_number,
             &mut *location,
@@ -293,7 +288,6 @@ fn get_line_information(
 
 fn identify_metadata(
     start_date: &mut Date,
-    valid_on: &mut ShiftValid,
     valid_days: &mut Vec<ShiftValidDay>,
     shift_number: &mut String,
     location: &mut String,
@@ -329,24 +323,9 @@ fn identify_metadata(
     }
     if metadata_clone.contains("ZA") {
         valid_days.push(ShiftValidDay::Saturday);
-        *valid_on = ShiftValid::Saturday;
     }
     if metadata_clone.contains("ZO") {
         valid_days.push(ShiftValidDay::Sunday);
-        *valid_on = ShiftValid::Sunday;
-    }
-
-    //Backwards compatibility
-    if metadata_clone.contains("MA/DI/WO/DO/VR") {
-        *valid_on = ShiftValid::Weekdays;
-    } else if metadata_clone.contains("MA/DI/DO/VR") {
-        *valid_on = ShiftValid::WeekdaysExceptWednesday;
-    } else if metadata_clone.contains("WO") {
-        *valid_on = ShiftValid::Wednesday;
-    } else if metadata_clone.contains("ZA") {
-        *valid_on = ShiftValid::Saturday;
-    } else if metadata_clone.contains("ZO") {
-        *valid_on = ShiftValid::Sunday;
     }
     Some(())
 }

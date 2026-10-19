@@ -28,7 +28,7 @@ use crate::prelude::*;
 type GeneralLocation = String;
 type SpecificLocation = String;
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, ToSchema)]
 pub struct DeadheadLocations {
     locations_vec: Vec<(String, Vec<String>)>,
     specific_to_general_map: HashMap<SpecificLocation, GeneralLocation>,
@@ -106,7 +106,7 @@ impl DeadheadLocations {
     // }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 struct DeadheadLocation<'a, 'b> {
     general: Option<&'b str>,
     specific: &'a str,
@@ -125,13 +125,15 @@ impl<'a, 'b> DeadheadLocation<'a, 'b> {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct Deadhead<'a, 'b> {
     #[serde(borrow)]
     from: DeadheadLocation<'a, 'b>,
     #[serde(borrow)]
     to: DeadheadLocation<'a, 'b>,
+    #[schema(value_type = String)]
     start: Time,
+    #[schema(value_type = String)]
     end: Time,
     omloop: Omloop,
     shift: &'a str,
@@ -299,6 +301,7 @@ struct DeadheadQuery {
     to: String,
 }
 
+#[utoipa::path(responses((status = OK, body = Vec<Deadhead>)))]
 #[get("/deadheads")]
 pub async fn get_deadheads(query: web::Query<DeadheadQuery>) -> HttpResponse {
     let (weekday, timetable) = match get_weekday_and_timetable(query.date.as_deref()) {
@@ -322,6 +325,7 @@ pub async fn get_deadheads(query: web::Query<DeadheadQuery>) -> HttpResponse {
     }
 }
 
+#[utoipa::path(responses((status = OK, body = Vec<(String, Vec<String>)>)))]
 #[get("/deadheads/locations")]
 pub async fn get_locations() -> HttpResponse {
     match DeadheadLocations::load()
