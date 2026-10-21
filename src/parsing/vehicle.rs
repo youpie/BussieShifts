@@ -5,7 +5,7 @@ use derive_new::new;
 use time::Weekday;
 
 use super::*;
-use crate::prelude::*;
+use crate::{prelude::*, shift_endpoint::return_error};
 
 #[derive(Debug, Serialize, Deserialize, Default, ToSchema)]
 struct ShiftOmlopen {
@@ -243,7 +243,7 @@ pub async fn get_vehicles_for_shift(
     query: web::Query<ShiftQuery>,
 ) -> HttpResponse {
     let shift = request.into_inner();
-    let (weekday, timetable) = match get_weekday_and_timetable(query.date.as_deref()) {
+    let (weekday, timetable) = match get_weekday_and_timetable(query.get_date()) {
         Ok(v) => v,
         Err(v) => return v,
     };
@@ -268,7 +268,7 @@ pub async fn get_vehicles_for_omloop(
     query: web::Query<ShiftQuery>,
 ) -> HttpResponse {
     let omloop = request.into_inner();
-    let (weekday, timetable) = match get_weekday_and_timetable(query.date.as_deref()) {
+    let (weekday, timetable) = match get_weekday_and_timetable(query.get_date()) {
         Ok(v) => v,
         Err(v) => return v,
     };
@@ -291,7 +291,7 @@ pub async fn get_vehicles_for_omloop(
 #[utoipa::path(responses((status = OK, body = Vec<String>)))]
 #[get("/vehicles/index")]
 pub async fn get_all_vehicles(query: web::Query<ShiftQuery>) -> HttpResponse {
-    let (_, timetable) = match get_weekday_and_timetable(query.date.as_deref()) {
+    let (_, timetable) = match get_weekday_and_timetable(query.get_date()) {
         Ok(v) => v,
         Err(v) => return v,
     };

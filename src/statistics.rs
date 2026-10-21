@@ -1,4 +1,5 @@
 use actix_web::{HttpResponse, http::header::ContentType};
+use actix_web::{get, web};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use time::Date;
@@ -7,8 +8,9 @@ use walkdir::WalkDir;
 use crate::index::IndexShift;
 use crate::parsing::{shift::Shift, timetable::*};
 use crate::prelude::*;
+use crate::shift_endpoint::ShiftQuery;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct Statistics {
     pub shifts: u64,
     pub valid_shifts: u64,
@@ -94,8 +96,10 @@ impl Statistics {
     }
 }
 
-pub fn handle_stats_request(date: Option<Date>) -> HttpResponse {
-    match Statistics::create(date) {
+#[utoipa::path(responses((status = OK, body = Statistics)))]
+#[get("/stats")]
+pub async fn handle_stats_request(date: web::Query<ShiftQuery>) -> HttpResponse {
+    match Statistics::create(date.get_date_option()) {
         Ok(statistics) => {
             let json = serde_json::to_string_pretty(&statistics).unwrap_or_default();
             HttpResponse::Ok()

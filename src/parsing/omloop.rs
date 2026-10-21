@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Display, fs, path::PathBuf};
 
 use actix_web::{HttpResponse, Responder, get, http::header::ContentType, web};
 use serde::{Deserialize, Serialize};
-use time::{Date, OffsetDateTime, Time, Weekday};
+use time::{Date, Time, Weekday};
 
 use super::*;
 use crate::prelude::*;
@@ -306,8 +306,11 @@ pub async fn get_omloop(
     request: web::Path<usize>,
     query: web::Query<ShiftQuery>,
 ) -> impl Responder {
-    info!("Got request for omloop {request} on {:?}", &query.date);
-    let (day_of_the_week, timetables) = match get_weekday_and_timetable(query.date.as_deref()) {
+    info!(
+        "Got request for omloop {request} on {:?}",
+        &query.get_date()
+    );
+    let (day_of_the_week, timetables) = match get_weekday_and_timetable(query.get_date()) {
         Ok(v) => v,
         Err(v) => return v,
     };
@@ -330,8 +333,8 @@ pub async fn get_omloop(
 #[utoipa::path(responses((status = OK, body = Vec<usize>)))]
 #[get("/omloop/index")]
 pub async fn get_omloop_overview(query: web::Query<ShiftQuery>) -> HttpResponse {
-    debug!("Got omloop index request on {:?}", query.date);
-    let (day_of_the_week, timetable) = match get_weekday_and_timetable(query.date.as_deref()) {
+    debug!("Got omloop index request on {:?}", query.get_date());
+    let (day_of_the_week, timetable) = match get_weekday_and_timetable(query.get_date()) {
         Ok(v) => v,
         Err(v) => return v,
     };
@@ -349,16 +352,8 @@ pub async fn get_omloop_overview(query: web::Query<ShiftQuery>) -> HttpResponse 
 }
 
 pub fn get_weekday_and_timetable(
-    date_string: Option<&str>,
+    date: Date,
 ) -> Result<(Weekday, TimetableCollection), HttpResponse> {
-    let date = date_string
-        .and_then(|date_string| {
-            Date::parse(date_string, DATE_FORMAT)
-                .warn_owned("parsing date")
-                .ok()
-        })
-        .unwrap_or(OffsetDateTime::now_utc().date());
-
     let day_of_the_week = date.weekday();
 
     let timetable =

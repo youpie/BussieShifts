@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 
 use actix_web::{HttpResponse, http::header::ContentType};
+use actix_web::{get, web};
 use serde::Serialize;
 use time::Date;
 
 use crate::parsing::timetable::*;
 use crate::prelude::*;
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct IndexShift {
     shift_number: String,
     valid_from: Date,
@@ -37,8 +38,10 @@ impl IndexShift {
     }
 }
 
-pub fn handle_index_request(date: Option<Date>) -> HttpResponse {
-    match IndexShift::get_valid_shifts(date) {
+#[utoipa::path(responses((status = OK, body = Vec<IndexShift>)))]
+#[get("/shift/index")]
+pub async fn handle_index_request(query: web::Query<ShiftQuery>) -> HttpResponse {
+    match IndexShift::get_valid_shifts(query.get_date_option()) {
         Ok(shifts) => HttpResponse::Ok()
             .content_type(ContentType::json())
             .body(serde_json::to_string_pretty(&shifts).unwrap()),

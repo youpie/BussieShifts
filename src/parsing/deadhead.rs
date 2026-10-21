@@ -301,10 +301,16 @@ struct DeadheadQuery {
     to: String,
 }
 
+impl DeadheadQuery {
+    pub fn get_date(&self) -> Date {
+        ShiftQuery::get_date(&ShiftQuery::new(self.date.clone()))
+    }
+}
+
 #[utoipa::path(responses((status = OK, body = Vec<Deadhead>)))]
 #[get("/deadheads")]
 pub async fn get_deadheads(query: web::Query<DeadheadQuery>) -> HttpResponse {
-    let (weekday, timetable) = match get_weekday_and_timetable(query.date.as_deref()) {
+    let (weekday, timetable) = match get_weekday_and_timetable(query.get_date()) {
         Ok(v) => v,
         Err(v) => return v,
     };

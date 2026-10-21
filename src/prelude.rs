@@ -7,7 +7,10 @@ pub use tracing::{debug, error, info, span, trace, warn};
 pub use utoipa::ToSchema;
 pub use utoipa_actix_web::{AppExt, scope};
 
-pub(crate) use crate::{COLLECTION_PATH, DATE_FORMAT, SHIFT_PATH, ShiftQuery, return_error};
+pub(crate) use crate::{
+    COLLECTION_PATH, DATE_FORMAT, SHIFT_PATH, shift_endpoint::ShiftQuery,
+    shift_endpoint::return_error,
+};
 
 pub trait ToNumber {
     fn to_number(&self) -> usize;
