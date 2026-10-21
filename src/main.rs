@@ -106,7 +106,10 @@ async fn main() -> std::io::Result<()> {
             .service(vehicle::get_vehicles_for_shift)
             .service(vehicle::get_vehicles_for_omloop)
             .split_for_parts();
-        _ = std::fs::write("./doc.json", serde_json::to_string_pretty(&api).unwrap());
+        _ = std::fs::write(
+            "./fertililty.json",
+            serde_json::to_string_pretty(&api).unwrap(),
+        );
         server
     })
     .bind("0.0.0.0:8080")?
