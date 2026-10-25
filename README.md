@@ -1,3 +1,5 @@
+# Moved to [Codeberg](https://codeberg.org/youpie/BussieShifts)
+---
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://brainmade.org/white-logo.svg">
   <source media="(prefers-color-scheme: light)" srcset="https://brainmade.org/black-logo.svg">
